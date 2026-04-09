@@ -1,0 +1,41 @@
+output_dir: "outputs/skill_cycle_os"
+
+# Agent used for both task execution and skill updates
+agent:
+  module: src.client.agents.VertexAgent
+  parameters:
+    project_id: "gen-lang-client-0167970622"
+    location: "us-central1"
+    model: "gemini-3.1-flash-lite-preview"
+    temperature: 0.2
+    max_output_tokens: 8192
+
+# Task worker (must be running before starting this script)
+# Start with: python -m src.start_task -a --config configs/start_skill_task_os.yaml
+task:
+  name: "os-skill"
+  controller_address: "http://localhost:5001/api"
+
+# Data splits produced by data/os_interaction/split_dataset.py
+data:
+  dev: "data/os_interaction/split_dev.json"   # 79 samples (60% of worlds 1-5, 7) — skill learning
+  val: "data/os_interaction/split_val.json"   # 56 samples (40% of worlds 1-5, 7) — monitoring
+
+# Task-specific eval function
+eval:
+  module: src.server.tasks.os_interaction.eval
+
+# Skill library
+skills:
+  base_dir: "skills/os/base"
+
+# Training loop hyperparameters
+cycle:
+  epochs: 5
+  update_every: 16        # ~5 batches per epoch over 79 dev samples
+  batch_concurrency: 8    # parallel samples per batch (task worker supports up to 24)
+  max_proposals: 1        # one change per proposal call; best-of-K selects the winner
+  max_learned_skills: 10
+  grpo_k: 4               # candidate proposals sampled per update
+  grpo_eval_n: 20         # probe set size: grpo_eval_n/2 failing + grpo_eval_n/2 passing
+  run_baseline: true      # run a silent val eval before epoch 0

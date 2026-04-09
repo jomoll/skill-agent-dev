@@ -1,0 +1,19 @@
+# Ignore everything by default.
+*
+
+# Keep the ignore file itself tracked.
+!.gitignore
+
+# Keep the source tree tracked.
+!src/
+!src/**
+
+# Keep skills tracked too.
+!skills/
+!skills/**
+
+# Still ignore common Python cache files if they appear inside src.
+src/**/__pycache__/
+src/**/*.py[cod]
+skills/**/__pycache__/
+skills/**/*.py[cod]

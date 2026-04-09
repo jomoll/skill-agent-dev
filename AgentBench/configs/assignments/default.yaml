@@ -1,0 +1,17 @@
+import: definition.yaml
+
+concurrency:
+  task:
+    dbbench-std: 5
+    os-std: 5
+  agent:
+    vertex-gemini: 50
+
+assignments: # List[Assignment] | Assignment
+  - agent: # "task": List[str] | str ,  "agent": List[str] | str
+      - vertex-gemini
+    task:
+      - dbbench-std
+      - os-std
+
+output: "outputs/{TIMESTAMP}"

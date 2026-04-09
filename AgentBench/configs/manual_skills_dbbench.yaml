@@ -1,0 +1,28 @@
+output_dir: "outputs/manual_skills_dbbench"
+
+agent:
+  module: src.client.agents.VertexAgent
+  parameters:
+    project_id: "gen-lang-client-0167970622"
+    location: "us-central1"
+    model: "gemini-3.1-flash-lite-preview"
+    temperature: 0.2
+    max_output_tokens: 8192
+
+task:
+  name: "dbbench-std"
+  controller_address: "http://localhost:5001/api"
+
+data:
+  dev: "data/dbbench/split_dev.json"
+  val: "data/dbbench/split_val.json"
+
+eval:
+  module: src.server.tasks.dbbench.eval
+
+skills:
+  base_dir: "skills/dbbench/base"
+  manual_dir: "skills/dbbench/manual_upper_bound"
+
+run:
+  batch_concurrency: 1

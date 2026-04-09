@@ -1,0 +1,43 @@
+output_dir: "outputs/skill_cycle_dbbench"
+
+# Agent used for both task execution and skill updates
+agent:
+  module: src.client.agents.VertexAgent
+  parameters:
+    project_id: "gen-lang-client-0167970622"
+    location: "us-central1"
+    model: "gemini-3.1-flash-lite-preview"
+    temperature: 0.2
+    max_output_tokens: 8192
+
+# Task worker (must be running before starting this script)
+# Start with: python -m src.start_task -a --config configs/start_skill_task_dbbench.yaml
+task:
+  name: "dbbench-std"
+  controller_address: "http://localhost:5010/api"
+
+# Data splits produced by data/dbbench/split_dataset.py
+data:
+  dev: "data/dbbench/split_dev.json"   # 176 samples (60% of standard.jsonl, stratified) — skill learning
+  val: "data/dbbench/split_val.json"   # 124 samples (40% of standard.jsonl, stratified) — monitoring
+  # test: data/dbbench/split_test.json  # 60 samples (dev.jsonl, never used during training)
+
+# Task-specific eval function
+eval:
+  module: src.server.tasks.dbbench.eval
+
+# Skill library
+skills:
+  base_dir: "skills/dbbench/base"
+
+# Training loop hyperparameters
+# DBBench shares one MySQL container with per-thread connections — concurrency > 1 is safe.
+cycle:
+  epochs: 5
+  update_every: 35        # ~5 batches per epoch over 176 dev samples
+  batch_concurrency: 5    # 
+  max_proposals: 1        # one change per proposal call; best-of-K selects the winner
+  max_learned_skills: 10
+  grpo_k: 4               # candidate proposals sampled per update
+  grpo_eval_n: 20         # smaller probe set (sequential execution is slow)
+  run_baseline: false      # run a silent val eval before epoch 0

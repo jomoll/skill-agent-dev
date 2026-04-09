@@ -1,0 +1,43 @@
+os-skill:
+  module: "src.server.tasks.os_interaction.OSInteraction"
+  parameters:
+    name: "os-skill"
+    concurrency: 24
+    round_limit: 8
+
+    docker_config:
+      localhost: local-os
+      directory: data/os_interaction/res/dockerfiles
+
+    scripts:
+      directory: data/os_interaction/res/scripts
+
+    data_config:
+      files:
+        # Dev worlds (skill learning): 1-5, 7
+        - problem_file: data/os_interaction/data/1/*.json
+          script_dir: data/os_interaction/scripts/1/
+          index_prefix: "std-001-"
+        - problem_file: data/os_interaction/data/2/*.json
+          script_dir: data/os_interaction/scripts/2/
+          index_prefix: "std-002-"
+        - problem_file: data/os_interaction/data/3/*.json
+          script_dir: data/os_interaction/scripts/3/
+          index_prefix: "std-003-"
+        - problem_file: data/os_interaction/data/4/*.json
+          script_dir: data/os_interaction/scripts/4/
+          index_prefix: "std-004-"
+        - problem_file: data/os_interaction/data/5/*.json
+          script_dir: data/os_interaction/scripts/5/
+          index_prefix: "std-005-"
+        - problem_file: data/os_interaction/data/7/*.json
+          script_dir: data/os_interaction/scripts/7/
+          index_prefix: "std-007-"
+        # Val split (dev.json — monitoring only, no skill updates from these)
+        - problem_file: data/os_interaction/data/dev.json
+          script_dir: data/os_interaction/scripts/dev/
+          index_prefix: "dev-001-"
+        # World 6 is intentionally excluded (held-out test set)
+
+      bk: []
+      ignore: []
