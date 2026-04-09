@@ -385,10 +385,16 @@ class LateralThinkingPuzzle(Task):
             self.inputs.append((story, answer, story_key, answer_key))
             self.targets.append(answer)
         self.eval_yaml = eval_yaml
-        self.eval_agent: AgentClient = InstanceFactory.parse_obj(
-            ConfigLoader().load_from(self.eval_yaml)["gpt-3.5-turbo-0613"]
-        ).create()
+        self._eval_agent: AgentClient = None  # lazy-init: credentials not needed at startup
         super().__init__(**configs)
+
+    @property
+    def eval_agent(self) -> AgentClient:
+        if self._eval_agent is None:
+            self._eval_agent = InstanceFactory.parse_obj(
+                ConfigLoader().load_from(self.eval_yaml)["gpt-3.5-turbo-0613"]
+            ).create()
+        return self._eval_agent
 
     def get_indices(self) -> List[SampleIndex]:
         return list(range(len(self.inputs)))

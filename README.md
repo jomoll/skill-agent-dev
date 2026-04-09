@@ -95,6 +95,27 @@ python -m src.skill_cycle --config configs/skill_cycle_dbbench.yaml --run-name r
 
 OS and DBBench use separate controller ports (5001 and 5010) and can run in parallel.
 
+### LTP (Lateral Thinking Puzzle)
+
+Requires the `longinyu/agentbench-ltp` Docker image and a running Vertex AI credential.
+The LTP task uses a second Gemini agent as the puzzle host (to answer yes/no questions).
+
+```bash
+# Pull the LTP Docker image (one-time)
+docker pull longinyu/agentbench-ltp
+
+# Generate data splits (one-time)
+python AgentBench/data/lateralthinkingpuzzle/split_dataset.py
+
+# Terminal 1 — start task worker (controller on port 5020, workers from 5021)
+cd AgentBench
+conda activate agent-bench
+python -m src.start_task -a --config configs/start_skill_task_ltp.yaml --controller-port 5020 --base-port 5021
+
+# Terminal 2 — run skill cycle
+python -m src.skill_cycle --config configs/skill_cycle_ltp.yaml --run-name run_001
+```
+
 ### MedAgentBench
 
 ```bash
@@ -128,12 +149,14 @@ python -m src.run_manual_skills --config configs/manual_skills_dbbench.yaml --sp
 | MedAgentBench | 126 | 84 | 90 | 60/40 within tasks 1–5,8,9; tasks 6/7/10 held out |
 | DBBench | 176 | 124 | 60 | 60/40 of standard.jsonl stratified by query type; dev.jsonl held out |
 | OS Interaction | 79 | 56 | 35 | 60/40 of worlds 1–5,7 stratified per world; world 6 + dev.json held out |
+| LTP | 30 | 20 | 20 | 60/40 of standard.xlsx; dev.xlsx held out |
 
 Regenerate splits:
 
 ```bash
 python AgentBench/data/dbbench/split_dataset.py
 python AgentBench/data/os_interaction/split_dataset.py
+python AgentBench/data/lateralthinkingpuzzle/split_dataset.py
 python MedAgentBench/data/medagentbench/split_dataset.py
 ```
 
@@ -147,6 +170,7 @@ Key config files:
 |---|---|
 | `AgentBench/configs/skill_cycle_os.yaml` | OS skill cycle hyperparameters |
 | `AgentBench/configs/skill_cycle_dbbench.yaml` | DBBench skill cycle hyperparameters |
+| `AgentBench/configs/skill_cycle_ltp.yaml` | LTP skill cycle hyperparameters |
 | `MedAgentBench/configs/skill_cycle.yaml` | MedAgentBench skill cycle hyperparameters |
 | `AgentBench/configs/agents/gemini-chat.yaml` | Vertex AI Gemini agent config |
 | `MedAgentBench/configs/agents/vertex-gemini.yaml` | Vertex AI Gemini agent config |

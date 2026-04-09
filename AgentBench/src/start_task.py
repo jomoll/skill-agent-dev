@@ -14,6 +14,14 @@ def _start_worker(name, port, controller, definition):
     if "docker" in conf and "image" in conf["docker"]:
         docker = conf["docker"]
         project_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+        # Mount host gcloud credentials so Docker-based task workers can call Vertex AI
+        gcloud_dir = os.path.expanduser("~/.config/gcloud")
+        gcloud_args = []
+        if os.path.exists(gcloud_dir):
+            gcloud_args = [
+                "-v", f"{gcloud_dir}:/root/.config/gcloud:ro",
+                "-e", "GOOGLE_APPLICATION_CREDENTIALS=/root/.config/gcloud/application_default_credentials.json",
+            ]
         subprocess.Popen(
             [
                 "docker",
@@ -27,6 +35,7 @@ def _start_worker(name, port, controller, definition):
                 f"{project_root}:/root/workspace",
                 "-w",
                 "/root/workspace",
+            ] + gcloud_args + [
                 docker["image"],
                 "bash",
                 "-c",
