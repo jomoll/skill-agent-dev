@@ -15,3 +15,9 @@ cg-std:
   parameters:
     name: "CardGame-std"
     test_time: 5
+
+card-game-skill:
+  parameters:
+    name: "card-game-skill"
+    concurrency: 5
+    test_time: 10   # 4 combos × 10 reps = 40 total (24 dev / 16 val)

@@ -4,7 +4,7 @@ Self-improving LLM agent framework using a GRPO-inspired skill cycle. Agents lea
 
 ```
 emnlp26/
-├── AgentBench/        # OS Interaction + DBBench skill cycle
+├── AgentBench/        # OS Interaction, DBBench, LTP, Card Game skill cycles
 └── MedAgentBench/     # FHIR medical records skill cycle
 ```
 
@@ -22,7 +22,7 @@ After each batch of task episodes, a skill-writing LLM observes the agent's fail
 - [Docker](https://www.docker.com/) installed and running
 - Google Cloud credentials for Vertex AI (`gcloud auth application-default login`)
 
-### 1. AgentBench (OS Interaction + DBBench)
+### 1. AgentBench (OS Interaction + DBBench + LTP + Card Game)
 
 ```bash
 cd AgentBench
@@ -42,6 +42,12 @@ docker build -f data/os_interaction/res/dockerfiles/ubuntu data/os_interaction/r
 
 # DBBench — pin to MySQL 8 (MySQL 9+ removed MD5 which the benchmark requires)
 docker pull mysql:8
+
+# LTP
+docker pull longinyu/agentbench-ltp
+
+# Card Game
+docker pull longinyu/agentbench-card_game
 ```
 
 ### 2. MedAgentBench
@@ -69,12 +75,21 @@ Download the reference solution file into `MedAgentBench/src/server/tasks/medage
 
 ## Running the skill cycle
 
+All benchmarks use separate controller ports and can run in parallel.
+
+| Benchmark | Controller port | Worker base port |
+|---|---|---|
+| OS Interaction | 5001 | 5002 |
+| DBBench | 5010 | 5011 |
+| LTP | 5020 | 5021 |
+| Card Game | 5030 | 5031 |
+| MedAgentBench | 5001 (default) | 5002 |
+
 ### OS Interaction
 
 ```bash
-# Terminal 1 — start task worker (controller on port 5001, workers from 5002)
-cd AgentBench
-conda activate agent-bench
+# Terminal 1 — start task worker
+cd AgentBench && conda activate agent-bench
 python -m src.start_task -a --config configs/start_skill_task_os.yaml
 
 # Terminal 2 — run skill cycle
@@ -84,36 +99,43 @@ python -m src.skill_cycle --config configs/skill_cycle_os.yaml --run-name run_00
 ### DBBench
 
 ```bash
-# Terminal 1 — start task worker (controller on port 5010, workers from 5011)
-cd AgentBench
-conda activate agent-bench
+# Terminal 1 — start task worker
+cd AgentBench && conda activate agent-bench
 python -m src.start_task -a --config configs/start_skill_task_dbbench.yaml --controller-port 5010 --base-port 5011
 
 # Terminal 2 — run skill cycle
 python -m src.skill_cycle --config configs/skill_cycle_dbbench.yaml --run-name run_001
 ```
 
-OS and DBBench use separate controller ports (5001 and 5010) and can run in parallel.
-
 ### LTP (Lateral Thinking Puzzle)
 
-Requires the `longinyu/agentbench-ltp` Docker image and a running Vertex AI credential.
-The LTP task uses a second Gemini agent as the puzzle host (to answer yes/no questions).
+The LTP task uses a second Gemini agent as the puzzle host (answers yes/no questions).
+Host credentials are automatically mounted from `~/.config/gcloud` into the Docker container.
 
 ```bash
-# Pull the LTP Docker image (one-time)
-docker pull longinyu/agentbench-ltp
-
 # Generate data splits (one-time)
-python AgentBench/data/lateralthinkingpuzzle/split_dataset.py
+cd AgentBench && python data/lateralthinkingpuzzle/split_dataset.py
 
-# Terminal 1 — start task worker (controller on port 5020, workers from 5021)
-cd AgentBench
-conda activate agent-bench
+# Terminal 1 — start task worker
+cd AgentBench && conda activate agent-bench
 python -m src.start_task -a --config configs/start_skill_task_ltp.yaml --controller-port 5020 --base-port 5021
 
 # Terminal 2 — run skill cycle
 python -m src.skill_cycle --config configs/skill_cycle_ltp.yaml --run-name run_001
+```
+
+### Card Game
+
+```bash
+# Generate data splits (one-time)
+cd AgentBench && python data/card_game/split_dataset.py
+
+# Terminal 1 — start task worker
+cd AgentBench && conda activate agent-bench
+python -m src.start_task -a --config configs/start_skill_task_card_game.yaml --controller-port 5030 --base-port 5031
+
+# Terminal 2 — run skill cycle
+python -m src.skill_cycle --config configs/skill_cycle_card_game.yaml --run-name run_001
 ```
 
 ### MedAgentBench
@@ -123,8 +145,7 @@ python -m src.skill_cycle --config configs/skill_cycle_ltp.yaml --run-name run_0
 docker run -p 8080:8080 medagentbench
 
 # Terminal 2 — start task worker
-cd MedAgentBench
-conda activate medagentbench
+cd MedAgentBench && conda activate medagentbench
 python -m src.start_task -a --config configs/start_skill_task.yaml
 
 # Terminal 3 — run skill cycle
@@ -150,6 +171,7 @@ python -m src.run_manual_skills --config configs/manual_skills_dbbench.yaml --sp
 | DBBench | 176 | 124 | 60 | 60/40 of standard.jsonl stratified by query type; dev.jsonl held out |
 | OS Interaction | 79 | 56 | 35 | 60/40 of worlds 1–5,7 stratified per world; world 6 + dev.json held out |
 | LTP | 30 | 20 | 20 | 60/40 of standard.xlsx; dev.xlsx held out |
+| Card Game | 24 | 16 | — | Stratified 60/40 by (baseline, agent_position); procedurally generated |
 
 Regenerate splits:
 
@@ -157,6 +179,7 @@ Regenerate splits:
 python AgentBench/data/dbbench/split_dataset.py
 python AgentBench/data/os_interaction/split_dataset.py
 python AgentBench/data/lateralthinkingpuzzle/split_dataset.py
+python AgentBench/data/card_game/split_dataset.py
 python MedAgentBench/data/medagentbench/split_dataset.py
 ```
 
@@ -171,6 +194,7 @@ Key config files:
 | `AgentBench/configs/skill_cycle_os.yaml` | OS skill cycle hyperparameters |
 | `AgentBench/configs/skill_cycle_dbbench.yaml` | DBBench skill cycle hyperparameters |
 | `AgentBench/configs/skill_cycle_ltp.yaml` | LTP skill cycle hyperparameters |
+| `AgentBench/configs/skill_cycle_card_game.yaml` | Card Game skill cycle hyperparameters |
 | `MedAgentBench/configs/skill_cycle.yaml` | MedAgentBench skill cycle hyperparameters |
 | `AgentBench/configs/agents/gemini-chat.yaml` | Vertex AI Gemini agent config |
 | `MedAgentBench/configs/agents/vertex-gemini.yaml` | Vertex AI Gemini agent config |
@@ -185,12 +209,14 @@ Skills are stored as markdown files with YAML frontmatter:
 
 ```
 AgentBench/skills/
-├── os/base/          # read-only OS base skills
-├── dbbench/base/     # read-only DBBench base skills
-└── base/             # shared skeleton template
+├── os/base/            # read-only OS base skills
+├── dbbench/base/       # read-only DBBench base skills
+├── ltp/base/           # read-only LTP base skills
+├── card_game/base/     # read-only Card Game base skills
+└── base/               # shared skeleton template
 
 MedAgentBench/skills/
-└── base/             # read-only MedAgentBench base skills
+└── base/               # read-only MedAgentBench base skills
 ```
 
 Learned skills are written to `outputs/<run>/skills/learned/` during training and loaded fresh on every inference call.

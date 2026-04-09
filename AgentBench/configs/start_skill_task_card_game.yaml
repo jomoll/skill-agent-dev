@@ -1,0 +1,13 @@
+# Start the Card Game task worker for the skill-learning cycle.
+#
+# Usage:
+#   python -m src.start_task -a --config configs/start_skill_task_card_game.yaml --controller-port 5030 --base-port 5031
+#
+# Then in a separate terminal:
+#   python -m src.skill_cycle --config configs/skill_cycle_card_game.yaml --run-name run_001
+
+definition:
+  import: tasks/task_assembly.yaml
+
+start:
+  card-game-skill: 1

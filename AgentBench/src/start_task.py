@@ -1,5 +1,6 @@
 import argparse
 import os
+import signal
 import subprocess
 import time
 from urllib.parse import urlparse
@@ -7,6 +8,8 @@ from urllib.parse import urlparse
 import requests
 
 from src.configs import ConfigLoader
+
+_procs = []  # all subprocesses started by this script
 
 
 def _start_worker(name, port, controller, definition):
@@ -22,7 +25,7 @@ def _start_worker(name, port, controller, definition):
                 "-v", f"{gcloud_dir}:/root/.config/gcloud:ro",
                 "-e", "GOOGLE_APPLICATION_CREDENTIALS=/root/.config/gcloud/application_default_credentials.json",
             ]
-        subprocess.Popen(
+        proc = subprocess.Popen(
             [
                 "docker",
                 "run",
@@ -46,7 +49,7 @@ def _start_worker(name, port, controller, definition):
             ]
         )
     else:
-        subprocess.Popen(
+        proc = subprocess.Popen(
             [
                 "python",
                 "-m",
@@ -60,9 +63,22 @@ def _start_worker(name, port, controller, definition):
                 controller,
             ],
         )
+    _procs.append(proc)
+
+
+def _shutdown(signum=None, frame=None):
+    for proc in _procs:
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+    raise SystemExit(0)
 
 
 if __name__ == "__main__":
+    signal.signal(signal.SIGINT, _shutdown)
+    signal.signal(signal.SIGTERM, _shutdown)
+
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--config",
@@ -98,7 +114,7 @@ if __name__ == "__main__":
             except Exception as e:
                 print("Specified controller not responding, trying to start a new one")
                 o = urlparse(config["controller"])
-                subprocess.Popen(
+                proc = subprocess.Popen(
                     [
                         "python",
                         "-m",
@@ -107,10 +123,12 @@ if __name__ == "__main__":
                         str(o.port),
                     ]
                 )
+                _procs.append(proc)
         else:
-            subprocess.Popen(
+            proc = subprocess.Popen(
                 ["python", "-m", "src.server.task_controller", "--port", str(args.controller_port)]
             )
+            _procs.append(proc)
         for i in range(10):
             try:
                 requests.get(f"http://localhost:{args.controller_port}/api/list_workers")

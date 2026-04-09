@@ -1,0 +1,42 @@
+output_dir: "outputs/skill_cycle_card_game"
+
+# Agent used for both task execution and skill updates
+agent:
+  module: src.client.agents.VertexAgent
+  parameters:
+    project_id: "gen-lang-client-0167970622"
+    location: "us-central1"
+    model: "gemini-2.5-flash-lite"
+    temperature: 0.2
+    max_output_tokens: 8192
+
+# Task worker (must be running before starting this script)
+# Start with: python -m src.start_task -a --config configs/start_skill_task_card_game.yaml --controller-port 5030 --base-port 5031
+task:
+  name: "card-game-skill"
+  controller_address: "http://localhost:5030/api"
+
+# Data splits produced by data/card_game/split_dataset.py
+data:
+  dev: "data/card_game/split_dev.json"   # 24 samples (6 reps × 4 combos) — skill learning
+  val: "data/card_game/split_val.json"   # 16 samples (4 reps × 4 combos) — monitoring
+
+# Task-specific eval function
+eval:
+  module: src.server.tasks.card_game.eval
+
+# Skill library
+skills:
+  base_dir: "skills/card_game/base"
+
+# Training loop hyperparameters
+# Card Game uses a shared socket server — multiple concurrent samples are safe.
+cycle:
+  epochs: 5
+  update_every: 8        # 3 batches per epoch over 24 dev samples
+  batch_concurrency: 5   # shared socket server supports up to workers=10
+  max_proposals: 1       # one change per proposal call; best-of-K selects the winner
+  max_learned_skills: 10
+  grpo_k: 4              # candidate proposals sampled per update
+  grpo_eval_n: 12        # balanced probe set (6 wins/losses target)
+  run_baseline: true    # run a silent val eval before epoch 0
