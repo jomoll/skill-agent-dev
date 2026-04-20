@@ -75,6 +75,35 @@ _INVALID_ACTION_STATUS = "agent invalid action"
 _INVALID_ACTION_REGRESSION_PENALTY = 2
 
 
+def _compute_skill_effectiveness(
+    all_entries: List[Dict],
+    prev_results: Optional[Dict[str, bool]],
+) -> Dict[str, Any]:
+    """
+    For each learned skill, count how many times it was present when a sample
+    changed state relative to the previous epoch.
+      fix:        was failing → now passing
+      regression: was passing → now failing
+    """
+    stats: Dict[str, Any] = {}
+    for entry in all_entries:
+        sample_id = entry.get("sample_id")
+        is_correct = entry.get("is_correct", False)
+        snapshot = entry.get("skill_snapshot_before") or []
+        skill_names = [s["name"] for s in snapshot if s["name"] != "skeleton"]
+        prev = prev_results.get(sample_id) if prev_results and sample_id else None
+        for skill_name in skill_names:
+            if skill_name not in stats:
+                stats[skill_name] = {"fixes": 0, "regressions": 0, "runs": 0}
+            stats[skill_name]["runs"] += 1
+            if prev is not None:
+                if not prev and is_correct:
+                    stats[skill_name]["fixes"] += 1
+                elif prev and not is_correct:
+                    stats[skill_name]["regressions"] += 1
+    return stats
+
+
 def _load_required_json_list(path: Path, label: str) -> List[Dict]:
     """
     Load a required JSON array artifact with a useful error message.
@@ -549,11 +578,14 @@ class SkillCycleRunner:
         # return multiple possible single-edit proposals per call; each
         # validated edit becomes its own candidate and is ranked independently.
         # Candidate evaluation still uses the probe set built below.
+        skill_effectiveness = _compute_skill_effectiveness(all_entries, prev_results)
+
         candidates = []
         all_raw_proposals = []  # collect every proposal before validation
         for k in range(self.grpo_k):
             proposals = self.updater.propose(
-                current_entries, self.skill_repo, prev_results=prev_results
+                current_entries, self.skill_repo, prev_results=prev_results,
+                skill_effectiveness=skill_effectiveness,
             )
             all_raw_proposals.extend(proposals)
             validated = self.updater.validate(proposals, self.skill_repo)
@@ -665,7 +697,19 @@ class SkillCycleRunner:
         print(f"  [ProposalRanking] winner: {best_candidate['action']}::{best_candidate['name']} "
               f"score={best_score:+d} (fixes={best_stats[0]}, "
               f"regressions={best_stats[1]}, invalid_action_regressions={best_stats[2]})")
-        applied = self.updater.apply([best_candidate], self.skill_repo)
+        winner = dict(best_candidate)
+        winner["_provenance"] = {
+            "epoch": epoch,
+            "update_cycle": update_cycle,
+            "action": winner["action"],
+            "probe_score": best_score,
+            "fixes": best_stats[0],
+            "regressions": best_stats[1],
+            "triggering_sample_ids": [
+                e["sample_id"] for e in current_entries if not e["is_correct"]
+            ][:10],
+        }
+        applied = self.updater.apply([winner], self.skill_repo)
         return applied, grpo_log, all_raw_proposals
 
     # ------------------------------------------------------------------

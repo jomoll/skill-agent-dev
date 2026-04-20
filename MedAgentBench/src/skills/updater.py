@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from src.client.agent import AgentClient
 from src.skills.repository import SkillRepository
@@ -70,6 +70,40 @@ def _format_skill_summary(skill: Dict[str, Any]) -> Dict[str, Any]:
         "tags": skill.get("tags") or [],
         "version": skill.get("version", 0),
     }
+
+
+def _format_skill_with_stats(
+    skill: Dict[str, Any],
+    effectiveness: Optional[Dict[str, Any]],
+) -> str:
+    """One-line summary of a learned skill including provenance and runtime stats."""
+    name = skill.get("name", "")
+    desc = skill.get("description", "")
+    version = skill.get("version", 1)
+    prov = skill.get("provenance") or {}
+
+    parts = [f"{name} (v{version})"]
+    if desc:
+        parts.append(f'"{desc}"')
+
+    if prov:
+        epoch = prov.get("epoch", "?")
+        uc = prov.get("update_cycle", "?")
+        ps = prov.get("probe_score", 0)
+        pf = prov.get("fixes", 0)
+        pr = prov.get("regressions", 0)
+        parts.append(f"born=E{epoch}/UC{uc} probe={ps:+d}({pf}fix,{pr}regr)")
+
+    eff = (effectiveness or {}).get(name)
+    if eff:
+        runs = eff.get("runs", 0)
+        ef = eff.get("fixes", 0)
+        er = eff.get("regressions", 0)
+        parts.append(f"recent={ef}fix,{er}regr/{runs}runs")
+    elif prov:
+        parts.append("recent=no_data")
+
+    return "  " + " | ".join(parts)
 
 
 def _format_log(entries: List[Dict], prev_results: Optional[Dict[str, bool]] = None) -> str:
@@ -170,6 +204,7 @@ def _build_prompt(
     max_proposals: int,
     max_learned_skills: int,
     prev_results: Optional[Dict[str, bool]] = None,
+    skill_effectiveness: Optional[Dict[str, Any]] = None,
 ) -> str:
     all_skills = skill_repo.load_all()
     learned_skills = [s for s in all_skills if skill_repo.exists_in_learned(s["name"])]
@@ -180,10 +215,12 @@ def _build_prompt(
     non_skeleton_refs = [s for s in reference_skills if s["name"] != "skeleton"]
 
     editable_names = [s["name"] for s in learned_skills]
-    editable_skill_section = (
-        json.dumps([_format_skill_summary(s) for s in learned_skills], indent=2, ensure_ascii=False)
-        if learned_skills else "(none yet)"
-    )
+    if learned_skills:
+        editable_skill_section = "\n".join(
+            _format_skill_with_stats(s, skill_effectiveness) for s in learned_skills
+        )
+    else:
+        editable_skill_section = "(none yet)"
     reference_skill_section = (
         json.dumps([_format_skill_summary(s) for s in non_skeleton_refs], indent=2, ensure_ascii=False)
         if non_skeleton_refs else "(none)"
@@ -191,14 +228,34 @@ def _build_prompt(
     skeleton_section = skeleton["content"] if skeleton else "(not found)"
     log_section = _format_log(entries, prev_results=prev_results)
 
-    skill_stats = (
-        f"Learned skills in library: {len(learned_skills)} / {max_learned_skills}\n"
-        f"Editable learned skill names: {', '.join(editable_names) if editable_names else '(none yet)'}"
-    )
+    slots_free = max_learned_skills - len(learned_skills)
+    if slots_free == 0:
+        skill_stats = (
+            f"Learned skills in library: {len(learned_skills)} / {max_learned_skills} — LIBRARY FULL.\n"
+            f"ADD is blocked. You MUST propose MODIFY or REMOVE (or both).\n"
+            f"Skills with recent=0fix or recent=no_data are the weakest removal candidates.\n"
+            f"To introduce a new skill, pair a REMOVE of the weakest existing skill with an ADD of the replacement in the same proposal array.\n"
+            f"Editable learned skill names: {', '.join(editable_names)}"
+        )
+    elif slots_free <= 2:
+        skill_stats = (
+            f"Learned skills in library: {len(learned_skills)} / {max_learned_skills} — only {slots_free} slot(s) remaining.\n"
+            f"Prefer REMOVE of a skill with recent=0fix,0regr (stale) + ADD of a better replacement over a plain ADD.\n"
+            f"Editable learned skill names: {', '.join(editable_names) if editable_names else '(none yet)'}"
+        )
+    else:
+        skill_stats = (
+            f"Learned skills in library: {len(learned_skills)} / {max_learned_skills}\n"
+            f"Editable learned skill names: {', '.join(editable_names) if editable_names else '(none yet)'}"
+        )
+
+    # When the library is full or nearly full the prompt asks for a REMOVE+ADD pair,
+    # so allow 2 proposals per call in those cases regardless of the base max_proposals.
+    effective_max_proposals = max(max_proposals, 2) if slots_free <= 2 else max_proposals
 
     return f"""You are helping improve a medical AI agent's skill library.
 
-You are the Skill Author. Read the current batch log and propose at most {max_proposals}
+You are the Skill Author. Read the current batch log and propose at most {effective_max_proposals}
 skill edits as valid JSON.
 
 --- SKILL CONTENT TEMPLATE ---
@@ -258,6 +315,7 @@ class SkillUpdater:
         entries: List[Dict],
         skill_repo: SkillRepository,
         prev_results: Optional[Dict[str, bool]] = None,
+        skill_effectiveness: Optional[Dict[str, Any]] = None,
     ) -> List[Dict]:
         """Call the LLM and return raw (unvalidated) proposals."""
         prompt = _build_prompt(
@@ -266,6 +324,7 @@ class SkillUpdater:
             self.max_proposals,
             self.max_learned_skills,
             prev_results=prev_results,
+            skill_effectiveness=skill_effectiveness,
         )
         history = [{"role": "user", "content": prompt}]
         try:
@@ -360,14 +419,16 @@ class SkillUpdater:
             description = proposal.get("description", "")
             content = proposal.get("content", "")
             tags = proposal.get("tags") or []
+            provenance = proposal.get("_provenance")  # attached by cycle, not from LLM
 
             if action == "ADD":
-                skill_repo.add(name, description, content, tags=tags)
+                skill_repo.add(name, description, content, tags=tags, provenance=provenance)
             elif action == "MODIFY":
-                skill_repo.modify(name, description, content, tags=tags)
+                skill_repo.modify(name, description, content, tags=tags, provenance=provenance)
             elif action == "REMOVE":
                 skill_repo.delete(name)
             else:
                 continue
-            applied.append(proposal)
+            # Strip internal keys before logging
+            applied.append({k: v for k, v in proposal.items() if not k.startswith("_")})
         return applied

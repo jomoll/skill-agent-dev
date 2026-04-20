@@ -37,18 +37,22 @@ def _parse_skill_file(path: Path) -> Dict:
         "description": meta.get("description", ""),
         "tags": meta.get("tags") or [],
         "version": meta.get("version", 0),
+        "provenance": meta.get("provenance"),  # None for pre-provenance skills
         "content": body,
     }
 
 
 def _write_skill_file(path: Path, name: str, description: str, content: str,
-                      tags: List[str], version: int) -> None:
+                      tags: List[str], version: int,
+                      provenance: Optional[Dict] = None) -> None:
     meta = {
         "name": name,
         "description": description,
         "tags": tags,
         "version": version,
     }
+    if provenance:
+        meta["provenance"] = provenance
     text = (
         f"---\n{yaml.dump(meta, default_flow_style=False).strip()}\n---\n\n"
         f"{content}\n"
@@ -91,16 +95,22 @@ class SkillRepository:
         return (self.learned_dir / f"{name}.md").exists()
 
     def add(self, name: str, description: str, content: str,
-            tags: Optional[List[str]] = None) -> None:
+            tags: Optional[List[str]] = None,
+            provenance: Optional[Dict] = None) -> None:
         path = self.learned_dir / f"{name}.md"
-        _write_skill_file(path, name, description, content, tags or [], version=1)
+        _write_skill_file(path, name, description, content, tags or [], version=1,
+                          provenance=provenance)
 
     def modify(self, name: str, description: str, content: str,
-               tags: Optional[List[str]] = None) -> None:
+               tags: Optional[List[str]] = None,
+               provenance: Optional[Dict] = None) -> None:
         path = self.learned_dir / f"{name}.md"
         if not path.exists():
             raise FileNotFoundError(f"Cannot modify non-existent learned skill: {name}")
         existing = _parse_skill_file(path)
+        # Attach parent_version so the history chain is traceable
+        prov = dict(provenance or {})
+        prov["parent_version"] = existing.get("version", 0)
         _write_skill_file(
             path,
             name,
@@ -108,6 +118,7 @@ class SkillRepository:
             content,
             tags if tags is not None else existing["tags"],
             version=existing["version"] + 1,
+            provenance=prov,
         )
 
     def delete(self, name: str) -> None:
