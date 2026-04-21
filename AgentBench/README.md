@@ -151,10 +151,10 @@ python -m src.assigner
 
 ### Skill-cycle (OS) quick start
 
-If you are running the OS skill-learning cycle and `5001` is already occupied on your machine, start the controller and workers on `5040+`:
+The OS skill-learning config defaults to controller `5040` and worker base port `5041` to avoid conflicts with `5001`.
 
 ```bash
-python -m src.start_task -a --config configs/start_skill_task_os.yaml --controller-port 5040 --base-port 5041
+python -m src.start_task -a --config configs/start_skill_task_os.yaml
 python -m src.skill_cycle --config configs/skill_cycle_os.yaml --run-name run_001 --force
 ```
 
