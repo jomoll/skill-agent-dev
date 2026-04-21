@@ -19,6 +19,6 @@ ltp-std:
 ltp-skill:
   parameters:
     name: ltp-skill
-    concurrency: 1
+    concurrency: 8
     filepath: "data/lateralthinkingpuzzle/standard.xlsx"
-    eval_yaml: "configs/agents/ltp_eval_vertex.yaml"
+    eval_yaml: "configs/agents/ltp_eval_http.yaml"

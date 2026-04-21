@@ -1,3 +1,4 @@
+import asyncio
 import json
 import socket
 
@@ -14,7 +15,7 @@ class Server:
             try:
                 self.socket.bind((self.host, self.port))
                 break
-            except OSError as e:
+            except OSError:
                 self.port += 1
         self.socket.listen(workers + 2)
         self.log = {}
@@ -23,10 +24,11 @@ class Server:
     async def start(self, folder, session):
         log_file = []
         print(111)
-        client_socket, client_address = self.socket.accept()
+        client_socket, client_address = await asyncio.to_thread(self.socket.accept)
         print(222)
         while True:
-            data = client_socket.recv(1000000).decode()
+            data = await asyncio.to_thread(client_socket.recv, 1000000)
+            data = data.decode()
             if data == "":
                 self.stop(client_socket)
                 break

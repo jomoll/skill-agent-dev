@@ -149,6 +149,39 @@ If everything is correctly configured so far, you can now initiate the task test
 python -m src.assigner
 ```
 
+### Skill-cycle (OS) quick start
+
+If you are running the OS skill-learning cycle and `5001` is already occupied on your machine, start the controller and workers on `5040+`:
+
+```bash
+python -m src.start_task -a --config configs/start_skill_task_os.yaml --controller-port 5040 --base-port 5041
+python -m src.skill_cycle --config configs/skill_cycle_os.yaml --run-name run_001 --force
+```
+
+The OS skill-cycle config is set to use `http://localhost:5040/api` as the controller.
+
+### Skill-cycle (ALFWorld) quick start
+
+Pull the ALFWorld Docker image first (requires network access):
+
+```bash
+docker pull longinyu/agentbench-alfworld
+```
+
+Start the task worker on `5060+` (avoids conflicts with OS and LTP workers):
+
+```bash
+python -m src.start_task -a --config configs/start_skill_task_alfworld.yaml --controller-port 5060 --base-port 5061
+```
+
+Then in a separate terminal run the skill-learning cycle:
+
+```bash
+python -m src.skill_cycle --config configs/skill_cycle_alfworld.yaml --run-name run_001 --force
+```
+
+The ALFWorld skill-cycle uses a stratified 60/40 split of `data/alfworld/standard.json` (30 dev + 20 val samples covering all 6 task types). Learned skills are written to `skills/alfworld/base/`.
+
 ## Next Steps
 
 If you wish to launch more tasks or use other models, you can refer to the content

@@ -1,20 +1,28 @@
 output_dir: "outputs/skill_cycle_os"
 
-# Agent used for both task execution and skill updates
+# Agent using local vLLM endpoint (LiteLLM proxy, OpenAI-compatible)
 agent:
-  module: src.client.agents.VertexAgent
+  module: src.client.agents.HTTPAgent
   parameters:
-    project_id: "gen-lang-client-0167970622"
-    location: "us-central1"
-    model: "gemini-3.1-flash-lite-preview"
-    temperature: 0.2
-    max_output_tokens: 8192
+    url: "http://10.32.16.43:4000/chat/completions"
+    headers:
+      Authorization: "Bearer sk--jYBY-YIx5jNQqR0LPgqdQ"
+      Content-Type: "application/json"
+    body:
+      model: "gpt-oss-120b"
+      temperature: 0.2
+      max_tokens: 8192
+    prompter:
+      name: role_content_dict
+      args:
+        agent_role: "assistant"   # OpenAI expects "assistant", not "agent"
+
 
 # Task worker (must be running before starting this script)
-# Start with: python -m src.start_task -a --config configs/start_skill_task_os.yaml
+# Start with: python -m src.start_task -a --config configs/start_skill_task_os.yaml --controller-port 5040 --base-port 5041
 task:
   name: "os-skill"
-  controller_address: "http://localhost:5001/api"
+  controller_address: "http://localhost:5040/api"
 
 # Data splits produced by data/os_interaction/split_dataset.py
 data:

@@ -39,11 +39,16 @@ class SkillAwareAgent(AgentClient):
         self.skill_repo = skill_repo
 
     def inference(self, history: List[dict]) -> str:
+        def _item_to_dict(item):
+            if isinstance(item, dict):
+                return item
+            return {"role": item.role, "content": item.content}
+
         skills = [s for s in self.skill_repo.load_all() if s["name"] != "skeleton"]
         if not skills:
-            return self.agent.inference(history)
+            return self.agent.inference([_item_to_dict(item) for item in history])
 
-        modified = list(history)
+        modified = [_item_to_dict(item) for item in history]
         first_content = modified[0]["content"]
 
         try:

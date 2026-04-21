@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import time
 from asyncio.exceptions import TimeoutError
+from typing import Optional
 
 import aiohttp
 import uvicorn
@@ -289,8 +290,9 @@ class TaskController:
 
         if worker.status != WorkerStatus.ALIVE:
             result = await self._sync_worker_status(data.name, worker.id)
-            if not result:
+            if result is False:
                 raise HTTPException(400, "Error: Worker status abnormal")
+            # result is None: worker alive but session locks contended — accept heartbeat
 
     async def start_sample(self, data: StartSampleRequest):
         print("starting")
@@ -458,7 +460,12 @@ class TaskController:
 
             return result
 
-    async def _sync_worker_status(self, name: str, worker_id: int) -> bool:
+    async def _sync_worker_status(self, name: str, worker_id: int) -> Optional[bool]:
+        """Sync worker status and return:
+        - True:  worker confirmed alive, state reconciled
+        - False: worker is unreachable / confirmed dead
+        - None:  worker is alive but session locks are contended (transient)
+        """
         print(f"syncing {name} task worker {worker_id}")
         await self.tasks_lock.acquire()
         target_worker = self.tasks[name].workers[worker_id]
@@ -506,7 +513,11 @@ class TaskController:
                         and sid_ not in result
                     )
                     if sessions is None:
-                        return False
+                        # Worker is alive but session locks are held — transient
+                        print(ColorMessage.yellow(
+                            f"syncing {name} task worker {worker_id}: session locks contended, will retry"
+                        ))
+                        return None
                     for sid in sessions:
                         del self.sessions[sid]
                     target_worker.status = WorkerStatus.ALIVE
@@ -534,7 +545,11 @@ class TaskController:
                     lambda _, s: s.worker_id == worker_id and s.name == name
                 )
                 if sessions is None:
-                    return False
+                    # Worker is alive but session locks are held — transient
+                    print(ColorMessage.yellow(
+                        f"syncing {name} task worker {worker_id}: session locks contended after cancel_all, will retry"
+                    ))
+                    return None
                 for sid in sessions:
                     del self.sessions[sid]
             target_worker.current = 0

@@ -1,14 +1,22 @@
 output_dir: "outputs/skill_cycle_ltp"
 
-# Agent used for both task execution and skill updates
+# Agent using local vLLM endpoint (LiteLLM proxy, OpenAI-compatible)
 agent:
-  module: src.client.agents.VertexAgent
+  module: src.client.agents.HTTPAgent
   parameters:
-    project_id: "gen-lang-client-0167970622"
-    location: "us-central1"
-    model: "gemini-3.1-flash-lite-preview"
-    temperature: 0.2
-    max_output_tokens: 8192
+    url: "http://10.32.16.43:4000/chat/completions"
+    headers:
+      Authorization: "Bearer sk--jYBY-YIx5jNQqR0LPgqdQ"
+      Content-Type: "application/json"
+    body:
+      model: "gpt-oss-120b"
+      temperature: 0.2
+      max_tokens: 8192
+    prompter:
+      name: role_content_dict
+      args:
+        agent_role: "assistant"   # OpenAI expects "assistant", not "agent"
+
 
 # Task worker (must be running before starting this script)
 # Start with: python -m src.start_task -a --config configs/start_skill_task_ltp.yaml --controller-port 5020 --base-port 5021
@@ -34,8 +42,8 @@ skills:
 # LTP tasks are expensive (25 rounds × 2 LLM calls each) — keep concurrency low.
 cycle:
   epochs: 5
-  update_every: 5        # 6 batches per epoch over 30 dev samples
-  batch_concurrency: 1   # Docker container per sample (similar to OS)
+  update_every: 16        # 2 batches per epoch over 30 dev samples
+  batch_concurrency: 8   # Docker container per sample (similar to OS)
   max_proposals: 1       # one change per proposal call; best-of-K selects the winner
   max_learned_skills: 10
   grpo_k: 4              # candidate proposals sampled per update

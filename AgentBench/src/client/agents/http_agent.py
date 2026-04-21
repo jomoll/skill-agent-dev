@@ -1,6 +1,9 @@
 import contextlib
+import random
+import re
 import time
 import warnings
+from datetime import datetime, timezone
 
 import requests
 from urllib3.exceptions import InsecureRequestWarning
@@ -8,6 +11,10 @@ from urllib3.exceptions import InsecureRequestWarning
 from src.typings import *
 from src.utils import *
 from ..agent import AgentClient
+
+# Re-import after wildcard imports to avoid the datetime *module* exported by
+# src.typings.config shadowing the datetime *class* imported above.
+from datetime import datetime, timezone
 
 old_merge_environment_settings = requests.Session.merge_environment_settings
 
@@ -161,6 +168,36 @@ def check_context_limit(content: str):
     return rule.check(content)
 
 
+def _parse_retry_delay(response_text: str, attempt: int, base_delay: float, max_delay: float) -> float:
+    """Return how many seconds to wait before the next retry.
+
+    Tries three strategies in order:
+    1. Parse an explicit "Limit resets at: <UTC timestamp>" from the body.
+    2. Parse an explicit "Try again in N seconds" hint.
+    3. Fall back to exponential backoff with ±20 % jitter.
+    """
+    # Strategy 1: "Limit resets at: 2026-04-09 13:08:06 UTC"
+    m = re.search(r"Limit resets at:\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) UTC", response_text)
+    if m:
+        try:
+            reset_dt = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+            wait = (reset_dt - datetime.now(timezone.utc)).total_seconds()
+            wait = max(1.0, wait + 2.0)  # small buffer
+            return min(wait, max_delay)
+        except ValueError:
+            pass
+
+    # Strategy 2: "Try again in N seconds"
+    m = re.search(r"[Tt]ry again in (\d+(?:\.\d+)?)\s*second", response_text)
+    if m:
+        return min(float(m.group(1)) + 1.0, max_delay)
+
+    # Strategy 3: exponential backoff with jitter
+    delay = min(base_delay * (2 ** attempt), max_delay)
+    jitter = delay * 0.2 * (random.random() - 0.5)
+    return max(1.0, delay + jitter)
+
+
 class HTTPAgent(AgentClient):
     def __init__(
         self,
@@ -170,6 +207,9 @@ class HTTPAgent(AgentClient):
         headers=None,
         return_format="{response}",
         prompter=None,
+        max_retries: int = 10,
+        retry_base_delay: float = 5.0,
+        retry_max_delay: float = 120.0,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -179,6 +219,9 @@ class HTTPAgent(AgentClient):
         self.body = body or {}
         self.return_format = return_format
         self.prompter = Prompter.get_prompter(prompter)
+        self.max_retries = max_retries
+        self.retry_base_delay = retry_base_delay
+        self.retry_max_delay = retry_max_delay
         if not self.url:
             raise Exception("Please set 'url' parameter")
 
@@ -186,7 +229,7 @@ class HTTPAgent(AgentClient):
         return self.prompter(history)
 
     def inference(self, history: List[dict]) -> str:
-        for _ in range(3):
+        for attempt in range(self.max_retries):
             try:
                 body = self.body.copy()
                 body.update(self._handle_history(history))
@@ -194,31 +237,42 @@ class HTTPAgent(AgentClient):
                     resp = requests.post(
                         self.url, json=body, headers=self.headers, proxies=self.proxies, timeout=120
                     )
-                # print(resp.status_code, resp.text)
+                if resp.status_code == 429:
+                    wait = _parse_retry_delay(
+                        resp.text, attempt, self.retry_base_delay, self.retry_max_delay
+                    )
+                    print(
+                        f"Warning:  Rate limited (attempt {attempt + 1}/{self.max_retries}),"
+                        f" retrying in {wait:.1f}s"
+                    )
+                    time.sleep(wait)
+                    continue
                 if resp.status_code != 200:
-                    # print(resp.text)
                     if check_context_limit(resp.text):
                         raise AgentContextLimitException(resp.text)
-                    else:
-                        raise Exception(
-                            f"Invalid status code {resp.status_code}:\n\n{resp.text}"
-                        )
+                    raise Exception(f"Invalid status code {resp.status_code}:\n\n{resp.text}")
             except AgentClientException as e:
                 raise e
             except Exception as e:
-                print("Warning: ", e)
-                pass
-            else:
-                resp = resp.json()
+                if attempt == self.max_retries - 1:
+                    raise
+                wait = _parse_retry_delay(
+                    str(e), attempt, self.retry_base_delay, self.retry_max_delay
+                )
+                print(f"Warning:  {e}")
+                time.sleep(wait)
+                continue
 
-                # Extract content from OpenAI-compatible API response (vLLM)
-                if isinstance(resp, dict) and "choices" in resp and len(resp["choices"]) > 0:
-                    message = resp["choices"][0].get("message", {})
-                    content = message.get("content", "")
-                    if content:
-                        return content
+            resp = resp.json()
 
-                # Fallback to return_format if not OpenAI format
-                return self.return_format.format(response=resp)
-            time.sleep(_ + 2)
-        raise Exception("Failed.")
+            # Extract content from OpenAI-compatible API response (vLLM)
+            if isinstance(resp, dict) and "choices" in resp and len(resp["choices"]) > 0:
+                message = resp["choices"][0].get("message", {})
+                content = message.get("content", "")
+                if content:
+                    return content
+
+            # Fallback to return_format if not OpenAI format
+            return self.return_format.format(response=resp)
+
+        raise Exception(f"Failed after {self.max_retries} attempts.")

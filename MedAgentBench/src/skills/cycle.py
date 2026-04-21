@@ -548,31 +548,21 @@ class SkillCycleRunner:
         Returns (applied: List[Dict], grpo_log: List[Dict]).
         """
         rng = random.Random(epoch * 1000 + update_cycle)
-
-        # Build balanced probe set: up to grpo_eval_n/2 from failing + passing
-        half = self.grpo_eval_n // 2
-        failing_ids = {e["sample_id"] for e in all_entries if not e["is_correct"]}
-        passing_ids = {e["sample_id"] for e in all_entries if e["is_correct"]}
-
-        # Map sample_id → sample dict for lookup
         id_to_sample = {s["id"]: s for s in self.dev_data}
 
-        probe_failing = rng.sample(
-            [id_to_sample[sid] for sid in failing_ids if sid in id_to_sample],
-            min(half, len(failing_ids)),
+        probe_set, probe_failing_ids = self._build_probe_set(
+            all_entries, prev_results, epoch, update_cycle, id_to_sample, rng
         )
-        probe_passing = rng.sample(
-            [id_to_sample[sid] for sid in passing_ids if sid in id_to_sample],
-            min(half, len(passing_ids)),
-        )
-        probe_set = probe_failing + probe_passing
-
-        if not probe_set:
-            print("  [ProposalRanking] no probe samples available, skipping update")
+        if probe_set is None:
+            print("  [ProposalRanking] skipping update: no out-of-sample probe data "
+                  "(epoch 0, batch 0)")
             return [], [], []
 
-        print(f"  [ProposalRanking] probe set: {len(probe_failing)} failing + "
-              f"{len(probe_passing)} passing = {len(probe_set)} samples")
+        n_failing = sum(1 for s in probe_set if s["id"] in probe_failing_ids)
+        n_passing = len(probe_set) - n_failing
+        print(f"  [ProposalRanking] probe set: {n_failing} failing + "
+              f"{n_passing} passing = {len(probe_set)} samples "
+              f"(out-of-sample from prior batches)")
 
         # Sample candidate edits from the current batch only. The updater may
         # return multiple possible single-edit proposals per call; each
@@ -640,7 +630,7 @@ class SkillCycleRunner:
                         if probe_result is None:
                             continue
                         is_correct, status = probe_result
-                        was_failing = sample["id"] in failing_ids
+                        was_failing = sample["id"] in probe_failing_ids
                         if was_failing and is_correct:
                             fixes += 1
                         elif not was_failing and not is_correct:
@@ -711,6 +701,98 @@ class SkillCycleRunner:
         }
         applied = self.updater.apply([winner], self.skill_repo)
         return applied, grpo_log, all_raw_proposals
+
+    # ------------------------------------------------------------------
+    # Probe set construction
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _stratified_sample(
+        samples: List[Dict],
+        key_fn,
+        n: int,
+        rng: random.Random,
+    ) -> List[Dict]:
+        """Sample up to n items stratified by key_fn, with at least 1 per type."""
+        if not samples or n <= 0:
+            return []
+        groups: Dict[str, List] = {}
+        for s in samples:
+            groups.setdefault(key_fn(s), []).append(s)
+        per_type = max(1, n // len(groups))
+        selected = []
+        for group_items in groups.values():
+            selected.extend(rng.sample(group_items, min(per_type, len(group_items))))
+        remaining = n - len(selected)
+        if remaining > 0:
+            selected_ids = {id(s) for s in selected}
+            pool = [s for s in samples if id(s) not in selected_ids]
+            if pool:
+                selected.extend(rng.sample(pool, min(remaining, len(pool))))
+        return selected
+
+    def _build_probe_set(
+        self,
+        all_entries: List[Dict],
+        prev_results: Optional[Dict[str, bool]],
+        epoch: int,
+        update_cycle: int,
+        id_to_sample: Dict[str, Dict],
+        rng: random.Random,
+    ):
+        """
+        Build a probe set that is out-of-sample relative to the generating batch.
+
+        Priority:
+          1. Entries from earlier batches of the current epoch
+             (update_cycle < current update_cycle).
+          2. For batch 0 of epoch > 0: use prev epoch results as the baseline.
+          3. Epoch 0, batch 0 — no out-of-sample data exists → return (None, None)
+             and the caller skips the update entirely.
+
+        Returns (probe_samples, probe_failing_ids) or (None, None).
+        """
+        half = self.grpo_eval_n // 2
+        type_key = lambda s: s.get("type", "other")
+
+        prior_entries = [
+            e for e in all_entries
+            if e.get("update_cycle", update_cycle) < update_cycle
+        ]
+        if prior_entries:
+            failing = [e for e in prior_entries if not e["is_correct"]]
+            passing = [e for e in prior_entries if e["is_correct"]]
+            probe_failing_ids = {e["sample_id"] for e in failing}
+            probe = (
+                self._stratified_sample(
+                    [id_to_sample[e["sample_id"]] for e in failing if e["sample_id"] in id_to_sample],
+                    type_key, half, rng,
+                )
+                + self._stratified_sample(
+                    [id_to_sample[e["sample_id"]] for e in passing if e["sample_id"] in id_to_sample],
+                    type_key, half, rng,
+                )
+            )
+            return (probe, probe_failing_ids) if probe else (None, None)
+
+        if epoch > 0 and prev_results:
+            # Batch 0 of a later epoch: no current-epoch prior batches yet,
+            # fall back to the previous epoch's results as the probe baseline.
+            failing_ids = {sid for sid, ok in prev_results.items() if not ok}
+            passing_ids = {sid for sid, ok in prev_results.items() if ok}
+            probe = (
+                self._stratified_sample(
+                    [id_to_sample[sid] for sid in failing_ids if sid in id_to_sample],
+                    type_key, half, rng,
+                )
+                + self._stratified_sample(
+                    [id_to_sample[sid] for sid in passing_ids if sid in id_to_sample],
+                    type_key, half, rng,
+                )
+            )
+            return (probe, failing_ids) if probe else (None, None)
+
+        return None, None  # epoch 0, batch 0 — skip update
 
     # ------------------------------------------------------------------
     # Batch execution (parallel)

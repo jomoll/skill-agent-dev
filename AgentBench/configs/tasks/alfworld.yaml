@@ -20,3 +20,9 @@ alfworld-std:
   parameters:
     name: alfworld-std
     split: "standard"
+
+alfworld-skill:
+  parameters:
+    name: alfworld-skill
+    concurrency: 5
+    split: "standard"

@@ -1,14 +1,21 @@
 output_dir: "outputs/skill_cycle_dbbench"
 
-# Agent used for both task execution and skill updates
+# Agent using local vLLM endpoint (LiteLLM proxy, OpenAI-compatible)
 agent:
-  module: src.client.agents.VertexAgent
+  module: src.client.agents.HTTPAgent
   parameters:
-    project_id: "gen-lang-client-0167970622"
-    location: "us-central1"
-    model: "gemini-3.1-flash-lite-preview"
-    temperature: 0.2
-    max_output_tokens: 8192
+    url: "http://10.32.16.43:4000/chat/completions"
+    headers:
+      Authorization: "Bearer pbzeeughofeanjey" # sk--jYBY-YIx5jNQqR0LPgqdQ"
+      Content-Type: "application/json"
+    body:
+      model: "gpt-oss-120b"
+      temperature: 0.2
+      max_tokens: 8192
+    prompter:
+      name: role_content_dict
+      args:
+        agent_role: "assistant"   # OpenAI expects "assistant", not "agent"
 
 # Task worker (must be running before starting this script)
 # Start with: python -m src.start_task -a --config configs/start_skill_task_dbbench.yaml
@@ -34,10 +41,10 @@ skills:
 # DBBench shares one MySQL container with per-thread connections — concurrency > 1 is safe.
 cycle:
   epochs: 5
-  update_every: 35        # ~5 batches per epoch over 176 dev samples
-  batch_concurrency: 5    # 
+  update_every: 44        # 4 batches per epoch over 176 dev samples (176/44 = 4 exactly)
+  batch_concurrency: 5    # matches task worker concurrency (per-thread MySQL connections)
   max_proposals: 1        # one change per proposal call; best-of-K selects the winner
   max_learned_skills: 10
   grpo_k: 4               # candidate proposals sampled per update
   grpo_eval_n: 20         # smaller probe set (sequential execution is slow)
-  run_baseline: false      # run a silent val eval before epoch 0
+  run_baseline: true      # run a silent val eval before epoch 0

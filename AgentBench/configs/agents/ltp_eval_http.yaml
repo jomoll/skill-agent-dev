@@ -1,0 +1,20 @@
+# Eval-agent config for the LTP task host (the agent that answers yes/no questions).
+#
+# Uses the same local LiteLLM proxy as the main skill-cycle agent.
+# The LTP task hardcodes the key "gpt-3.5-turbo-0613" when loading this file.
+
+gpt-3.5-turbo-0613:
+  module: src.client.agents.HTTPAgent
+  parameters:
+    url: "http://10.32.16.43:4000/chat/completions"
+    headers:
+      Authorization: "Bearer sk--jYBY-YIx5jNQqR0LPgqdQ"
+      Content-Type: "application/json"
+    body:
+      model: "gpt-oss-120b"
+      temperature: 0
+      max_tokens: 512
+    prompter:
+      name: role_content_dict
+      args:
+        agent_role: "assistant"

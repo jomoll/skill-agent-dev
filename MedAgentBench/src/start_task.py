@@ -82,30 +82,27 @@ if __name__ == "__main__":
     root = os.path.dirname(os.path.abspath(__file__))
 
     if args.controller:
-        if "controller" in config:
-            try:
-                requests.get(config["controller"] + "/list_workers")
-            except Exception as e:
-                print("Specified controller not responding, trying to start a new one")
-                o = urlparse(config["controller"])
-                subprocess.Popen(
-                    [
-                        "python",
-                        "-m",
-                        "src.server.task_controller",
-                        "--port",
-                        str(o.port),
-                    ]
-                )
+        # Determine the controller address and port to use
+        if args.controller_addr:
+            controller_url = args.controller_addr
+        elif "controller" in config:
+            controller_url = config["controller"]
         else:
+            controller_url = "http://localhost:5001/api"
+        controller_port = urlparse(controller_url).port or 5001
+
+        try:
+            requests.get(controller_url + "/list_workers")
+        except Exception:
+            print("Specified controller not responding, trying to start a new one")
             subprocess.Popen(
-                ["python", "-m", "src.server.task_controller", "--port", "5001"]
+                ["python", "-m", "src.server.task_controller", "--port", str(controller_port)]
             )
         for i in range(10):
             try:
-                requests.get("http://localhost:5001/api/list_workers")
+                requests.get(f"http://localhost:{controller_port}/api/list_workers")
                 break
-            except Exception as e:
+            except Exception:
                 print("Waiting for controller to start...")
                 time.sleep(0.5)
         else:
