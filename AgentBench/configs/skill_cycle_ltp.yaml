@@ -42,10 +42,11 @@ skills:
 # LTP tasks are expensive (25 rounds × 2 LLM calls each) — keep concurrency low.
 cycle:
   epochs: 5
-  update_every: 16        # 2 batches per epoch over 30 dev samples
+  update_every: 30        # 1 batch per epoch (full epoch) over 30 dev samples
   batch_concurrency: 8   # Docker container per sample (similar to OS)
   max_proposals: 1       # one change per proposal call; best-of-K selects the winner
   max_learned_skills: 10
   grpo_k: 4              # candidate proposals sampled per update
   grpo_eval_n: 10        # small probe set (25-round conversations are slow)
-  run_baseline: true    # run a silent val eval before epoch 0
+  run_baseline: true     # run a silent val eval before epoch 0
+  proposal_temperature: 0.8  # high temperature for diverse skill proposals (separate from agent temperature)

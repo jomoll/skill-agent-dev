@@ -9,5 +9,9 @@
 definition:
   import: tasks/task_assembly.yaml
 
+controller: "http://localhost:5040/api"
+controller_port: 5040
+base_port: 5041
+
 start:
   os-skill: 1

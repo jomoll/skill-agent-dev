@@ -2,30 +2,17 @@
 SkillAwareAgent — wraps any AgentClient and injects the current skill library
 into the first user message before each inference call.
 
-Skills are always injected as structured JSON fields:
+Skills are appended as a plain-text block after the original prompt content.
+Each skill is introduced by its description so the model can judge applicability
+at a glance; the full content follows for when the skill is relevant.
 
-    {
-      "selected_skills": ["skill1", "skill2"],
-      "skill_documentation": {
-        "skill1": "# description\\n\\ncontent...",
-        "skill2": "content..."
-      },
-      "task": "<original prompt text or original JSON object>"
-    }
-
-If the first message is already a JSON object (e.g. MedAgentBench-style), skills
-are merged into the existing object's top-level keys (preserving all other fields).
-If the first message is plain text (OS Interaction, DBBench), it is wrapped in the
-envelope above under the "task" key.
-
-For DBBench-style SQL tasks a "protocol_reminder" field is also added to the
-envelope, reinforcing the exact required output protocol.
+The model is told once, at the top of the block, to apply skills that match and
+ignore the rest — no per-skill checklists.
 
 Skills named "skeleton" (the read-only base template) are never injected.
 If no skills exist and the task is not DBBench, history is passed through unchanged.
 """
 
-import json
 from typing import List
 
 from ..agent import AgentClient
@@ -46,35 +33,35 @@ class SkillAwareAgent(AgentClient):
         if not skills and not is_dbbench:
             return self.agent.inference(history)
 
-        modified = list(history)
-
-        # Build or extend a JSON envelope for the first message.
-        # Field order: skills first, then task, then protocol_reminder last.
-        # Skills-first primes the model with behavioral constraints before it reads
-        # the task; task+protocol_reminder last maximizes recency for the objective
-        # and output format.
-        try:
-            existing = json.loads(first_content)
-        except (json.JSONDecodeError, TypeError, AttributeError):
-            existing = {"task": first_content}
-
-        prompt_data: dict = {}
-
+        suffix_parts = []
         if skills:
-            prompt_data["selected_skills"] = [s["name"] for s in skills]
-            prompt_data["skill_documentation"] = {
-                s["name"]: (f"# {s['description']}\n\n" if s["description"] else "") + s["content"]
-                for s in skills
-            }
-
-        # Merge all original fields (task, api, response_format, etc.) after skills
-        prompt_data.update(existing)
-
+            suffix_parts.append(self._render_skills(skills))
         if is_dbbench:
-            prompt_data["protocol_reminder"] = self._dbbench_protocol()
+            suffix_parts.append(self._dbbench_protocol())
 
-        modified[0] = {"role": "user", "content": json.dumps(prompt_data, indent=2)}
+        modified = list(history)
+        modified[0] = {
+            "role": "user",
+            "content": first_content + "\n\n" + "\n\n".join(suffix_parts),
+        }
         return self.agent.inference(modified)
+
+    @staticmethod
+    def _render_skills(skills: list) -> str:
+        header = (
+            "---\n"
+            "**Behavioral skills:** before each action, scan the skill descriptions "
+            "below. If a skill's 'When to use' matches your current task or the action "
+            "you are about to take, follow its guidance. Skip skills that do not match.\n"
+        )
+        blocks = []
+        for s in skills:
+            name = s["name"]
+            desc = s.get("description", "")
+            content = s.get("content", "")
+            desc_line = f"*When to use: {desc}*\n" if desc else ""
+            blocks.append(f"### {name}\n{desc_line}\n{content}")
+        return header + "\n\n".join(blocks)
 
     @classmethod
     def _is_dbbench_prompt(cls, content: str) -> bool:
@@ -89,10 +76,10 @@ class SkillAwareAgent(AgentClient):
     @staticmethod
     def _dbbench_protocol() -> str:
         return (
-            "You are in a strict SQL benchmark. "
-            "Output exactly one valid action each turn.\n"
+            "---\n"
+            "**SQL protocol reminder:** output exactly one valid action each turn.\n"
             "- To query or modify the database: Action: Operation + SQL block\n"
             "- When done: Action: Answer + Final Answer: [\"...\"]\n"
-            "Never output placeholders like \"normal\". Never omit the Action line.\n"
+            "Never output placeholders. Never omit the Action line.\n"
             "For INSERT/UPDATE tasks, verify with a targeted SELECT before answering."
         )

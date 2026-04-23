@@ -106,7 +106,11 @@ def _format_skill_with_stats(
     return "  " + " | ".join(parts)
 
 
-def _format_log(entries: List[Dict], prev_results: Optional[Dict[str, bool]] = None) -> str:
+def _format_log(
+    entries: List[Dict],
+    prev_results: Optional[Dict[str, bool]] = None,
+    diagnoses: Optional[Dict[str, str]] = None,
+) -> str:
     lines: List[str] = []
     for entry in entries:
         sample_id = entry.get("sample_id", "unknown")
@@ -152,6 +156,10 @@ def _format_log(entries: List[Dict], prev_results: Optional[Dict[str, bool]] = N
                 lines.append(f"- {role}: {compact}")
         if error:
             lines.append(f"Error: {error}")
+        if diagnoses and not is_correct:
+            diag = diagnoses.get(str(sample_id))
+            if diag:
+                lines.append(f"Diagnosis: {diag}")
         lines.append("")
     return "\n".join(lines).strip()
 
@@ -205,6 +213,8 @@ def _build_prompt(
     max_learned_skills: int,
     prev_results: Optional[Dict[str, bool]] = None,
     skill_effectiveness: Optional[Dict[str, Any]] = None,
+    failure_mode: Optional[str] = None,
+    diagnosis: Optional[Dict[str, str]] = None,
 ) -> str:
     all_skills = skill_repo.load_all()
     learned_skills = [s for s in all_skills if skill_repo.exists_in_learned(s["name"])]
@@ -226,7 +236,7 @@ def _build_prompt(
         if non_skeleton_refs else "(none)"
     )
     skeleton_section = skeleton["content"] if skeleton else "(not found)"
-    log_section = _format_log(entries, prev_results=prev_results)
+    log_section = _format_log(entries, prev_results=prev_results, diagnoses=diagnosis)
 
     slots_free = max_learned_skills - len(learned_skills)
     if slots_free == 0:
@@ -272,7 +282,7 @@ Editable learned skills:
 {skill_stats}
 
 --- PERFORMANCE LOG ---
-{log_section}
+{f"Dominant failure mode in this group: {failure_mode}" + chr(10) if failure_mode else ""}{log_section}
 
 Return ONLY a JSON array of proposed edits:
 [
@@ -310,12 +320,222 @@ class SkillUpdater:
         self.max_proposals = max_proposals
         self.max_learned_skills = max_learned_skills
 
+    def classify_failures(
+        self,
+        entries: List[Dict],
+        prev_taxonomy: Optional[Dict[str, str]] = None,
+    ) -> tuple:
+        """
+        Classify each failing entry with a short mechanistic failure mode label.
+
+        When prev_taxonomy is provided (label -> description from the previous epoch),
+        the classifier reuses those labels when they fit and introduces new ones only
+        for genuinely novel failure patterns.
+
+        Returns (sample_to_label, new_labels) where:
+          sample_to_label: {sample_id: label}
+          new_labels:      {label: description} for labels not in prev_taxonomy
+        Falls back to ({}, {}) on any error.
+        """
+        failing = [e for e in entries if not e.get("is_correct", False)]
+        if not failing:
+            return {}, {}
+
+        lines = []
+        for e in failing:
+            sid = e.get("sample_id", "?")
+            instruction = str(e.get("instruction", "") or "")[:150].replace("\n", " ")
+            tags = e.get("failure_tags") or []
+            actions = e.get("agent_actions") or []
+            last = actions[-2:] if len(actions) >= 2 else actions
+            last_str = " | ".join(str(a)[:120].replace("\n", " ") for a in last)
+            lines.append(
+                f'  "{sid}": instruction="{instruction}" tags={tags} last_actions="{last_str}"'
+            )
+
+        if prev_taxonomy:
+            taxonomy_section = (
+                "Reference labels from the previous epoch — reuse these when they fit, "
+                "and only introduce a new label if a failure pattern is genuinely not "
+                "covered by any of them:\n"
+                + "\n".join(f'  "{k}": {v}' for k, v in prev_taxonomy.items())
+            )
+        else:
+            taxonomy_section = (
+                "No existing labels — define fresh mechanistic labels for these failures."
+            )
+
+        prompt = (
+            "Classify each failing agent trace with a short mechanistic failure mode label "
+            "(3-6 words, snake_case). Focus on WHAT went wrong mechanistically.\n\n"
+            + taxonomy_section + "\n\n"
+            "Failing traces:\n" + "\n".join(lines) + "\n\n"
+            "Return ONLY a JSON object with two keys:\n"
+            '{\n'
+            '  "labels": {"sample_id": "label", ...},\n'
+            '  "new_labels": {"label": "one-line description"}\n'
+            '}\n'
+            '"new_labels" must only contain labels NOT present in the reference set above. '
+            "If all labels reuse existing ones, set \"new_labels\" to {}."
+        )
+
+        try:
+            response = self.agent.inference([{"role": "user", "content": prompt}])
+            fenced = _extract_fenced_payload(response)
+            raw = fenced or response
+            block = _extract_balanced_json_block(raw.strip(), "{", "}")
+            if block:
+                data = json.loads(block)
+                if isinstance(data, dict):
+                    sample_to_label = {
+                        str(k): str(v) for k, v in data.get("labels", {}).items()
+                        if isinstance(v, str)
+                    }
+                    # Compute new labels from the diff — don't trust LLM self-reporting.
+                    # Any label used in sample_to_label that isn't in prev_taxonomy is new.
+                    llm_descriptions = {
+                        str(k): str(v) for k, v in data.get("new_labels", {}).items()
+                        if isinstance(v, str)
+                    }
+                    known = set(prev_taxonomy or {})
+                    new_labels = {
+                        lbl: llm_descriptions.get(lbl, lbl.replace("_", " "))
+                        for lbl in set(sample_to_label.values())
+                        if lbl not in known
+                    }
+                    unique_labels = set(sample_to_label.values())
+                    n_reused = len(unique_labels - set(new_labels))
+                    print(
+                        f"[SkillUpdater] classified {len(failing)} failing traces → "
+                        f"{len(unique_labels)} mode(s) "
+                        f"({n_reused} reused, {len(new_labels)} new): "
+                        + ", ".join(
+                            f"{lbl}({sum(1 for v in sample_to_label.values() if v == lbl)})"
+                            for lbl in sorted(unique_labels)
+                        )
+                    )
+                    return sample_to_label, new_labels
+        except Exception as e:
+            print(f"[SkillUpdater] classify_failures failed: {e}")
+        return {}, {}
+
+    def diagnose(
+        self,
+        entries: List[Dict],
+        skill_repo: SkillRepository,
+        failure_labels: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, str]:
+        """
+        For each failing entry produce a one-sentence targeted diagnosis:
+        which existing skill gap or missing instruction caused the failure.
+        Returns {sample_id: diagnosis_str}. Falls back to {} on any error.
+        """
+        failing = [e for e in entries if not e.get("is_correct", False)]
+        if not failing:
+            return {}
+
+        all_skills = skill_repo.load_all()
+        learned = [s for s in all_skills if skill_repo.exists_in_learned(s["name"])]
+        skill_summary = (
+            "\n".join(f"  [{s['name']}]: {s['description']}" for s in learned)
+            if learned else "(no learned skills yet)"
+        )
+
+        lines = []
+        for e in failing:
+            sid = e.get("sample_id", "?")
+            label = (failure_labels or {}).get(str(sid), "unknown")
+            instruction = str(e.get("instruction", "") or "")[:120].replace("\n", " ")
+            actions = e.get("agent_actions") or []
+            last = actions[-3:] if len(actions) >= 3 else actions
+            last_str = " | ".join(str(a)[:120].replace("\n", " ") for a in last)
+            lines.append(
+                f'  "{sid}": label="{label}" task="{instruction}" last_actions="{last_str}"'
+            )
+
+        prompt = (
+            "You are diagnosing why an AI agent failed on benchmark tasks.\n\n"
+            "Current learned skills:\n" + skill_summary + "\n\n"
+            "Failing traces:\n" + "\n".join(lines) + "\n\n"
+            "For each sample write ONE sentence identifying:\n"
+            "- which existing skill should have prevented this failure but didn't "
+            "(name the skill and the exact missing trigger or rule), OR\n"
+            "- what new skill mechanism is needed if no existing skill is relevant.\n"
+            "Be specific: name exact commands, output patterns, or decision points.\n\n"
+            'Return ONLY a JSON object: {"sample_id": "one-sentence diagnosis", ...}'
+        )
+
+        try:
+            response = self.agent.inference([{"role": "user", "content": prompt}])
+            fenced = _extract_fenced_payload(response)
+            raw = fenced or response
+            block = _extract_balanced_json_block((raw or "").strip(), "{", "}")
+            if block:
+                data = json.loads(block)
+                if isinstance(data, dict):
+                    result = {str(k): str(v) for k, v in data.items() if isinstance(v, str)}
+                    print(f"[SkillUpdater] diagnosed {len(result)}/{len(failing)} failing traces")
+                    return result
+        except Exception as e:
+            print(f"[SkillUpdater] diagnose failed: {e}")
+        return {}
+
+    def revise(
+        self,
+        proposal: Dict,
+        regression_entries: List[Dict],
+        skill_repo: SkillRepository,
+    ) -> List[Dict]:
+        """
+        Given a proposal that caused regressions, generate a revised version
+        that preserves the original fixes while avoiding the regressions.
+        Returns raw (unvalidated) proposals. Falls back to [] on any error.
+        """
+        if not regression_entries:
+            return []
+
+        regression_log = _format_log(regression_entries)
+        action = proposal.get("action", "")
+        name = proposal.get("name", "")
+        content = proposal.get("content", "")
+        description = proposal.get("description", "")
+
+        prompt = (
+            f"Your previous skill proposal caused {len(regression_entries)} regression(s) — "
+            f"samples that were passing before but now fail.\n\n"
+            f"Original proposal:\n"
+            f"  Action: {action}\n"
+            f"  Name: {name}\n"
+            f"  Description: {description}\n"
+            f"  Content:\n{content}\n\n"
+            f"Traces of samples that REGRESSED (were passing, now failing):\n"
+            f"{regression_log}\n\n"
+            f"Revise the proposal so it still fixes the original failures "
+            f"but no longer breaks these samples.\n"
+            f"Typical fixes: narrow the trigger condition, add a guard clause that "
+            f"exempts the regression pattern, or split into two more specific rules.\n"
+            f"Do NOT broaden the skill or remove its core mechanism.\n\n"
+            f"Return ONLY a JSON array with the revised proposal:\n"
+            f'[{{"action": "{action}", "name": "{name}", '
+            f'"description": "...", "content": "...", "tags": []}}]'
+        )
+
+        try:
+            response = self.agent.inference([{"role": "user", "content": prompt}])
+            proposals = _extract_json_array(response)
+            return [p for p in proposals if isinstance(p, dict)]
+        except Exception as e:
+            print(f"[SkillUpdater] revise failed: {e}")
+        return []
+
     def propose(
         self,
         entries: List[Dict],
         skill_repo: SkillRepository,
         prev_results: Optional[Dict[str, bool]] = None,
         skill_effectiveness: Optional[Dict[str, Any]] = None,
+        failure_mode: Optional[str] = None,
+        diagnosis: Optional[Dict[str, str]] = None,
     ) -> List[Dict]:
         """Call the LLM and return raw (unvalidated) proposals."""
         prompt = _build_prompt(
@@ -325,6 +545,8 @@ class SkillUpdater:
             self.max_learned_skills,
             prev_results=prev_results,
             skill_effectiveness=skill_effectiveness,
+            failure_mode=failure_mode,
+            diagnosis=diagnosis,
         )
         history = [{"role": "user", "content": prompt}]
         try:

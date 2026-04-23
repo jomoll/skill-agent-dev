@@ -3,23 +3,19 @@ SkillAwareAgent — wraps any AgentClient and injects the current skill library
 into the first user message before each inference call.
 
 When the first message is a JSON-structured task prompt (as produced by
-_build_task_prompt in the task server), skills are injected into the dedicated
-`selected_skills` and `skill_documentation` fields:
+_build_task_prompt in the task server), skills are injected as a single
+plain-text `behavioral_skills` field alongside the existing JSON fields:
 
     {
       "phase": "task_execution",
-      "task": { "description": "...", "context": "..." },
-      "selected_skills": ["magnesium_threshold", "finish_format"],
-      "skill_documentation": {
-        "magnesium_threshold": "# Mg < 1.9 mEq/L requires IV replacement\n...",
-        "finish_format": "# FINISH format\n..."
-      },
+      "task": { ... },
+      "behavioral_skills": "### skill_name\n*When to use: ...*\n\n...",
       "api": { ... },
       "response_format": { ... }
     }
 
-If the first message is plain text (legacy format), falls back to prepending
-a [SKILLS] block before the task text.
+If the first message is plain text (legacy format), skills are appended after
+the task content, separated by a divider.
 
 Skills named "skeleton" (the read-only base template) are never injected.
 If no learned skills exist the history is passed through unchanged.
@@ -50,30 +46,37 @@ class SkillAwareAgent(AgentClient):
 
         modified = [_item_to_dict(item) for item in history]
         first_content = modified[0]["content"]
+        skill_block = self._render_skills(skills)
 
         try:
             prompt_data = json.loads(first_content)
-            prompt_data["selected_skills"] = [s["name"] for s in skills]
-            prompt_data["skill_documentation"] = {
-                s["name"]: (f"# {s['description']}\n\n" if s["description"] else "") + s["content"]
-                for s in skills
-            }
+            # Remove legacy fields if present from prior runs
+            prompt_data.pop("skill_instruction", None)
+            prompt_data.pop("selected_skills", None)
+            prompt_data.pop("skill_documentation", None)
+            prompt_data["behavioral_skills"] = skill_block
             modified[0] = {"role": "user", "content": json.dumps(prompt_data, indent=2)}
         except (json.JSONDecodeError, TypeError, AttributeError):
-            # Fallback for plain-text prompts
-            skill_block = self._format_skills_text(skills)
-            modified[0] = {"role": "user", "content": skill_block + first_content}
+            modified[0] = {
+                "role": "user",
+                "content": first_content + "\n\n" + skill_block,
+            }
 
         return self.agent.inference(modified)
 
     @staticmethod
-    def _format_skills_text(skills: List[dict]) -> str:
-        lines = ["[SKILLS]\n"]
-        for skill in skills:
-            lines.append(f"--- skill: {skill['name']} ---\n")
-            if skill["description"]:
-                lines.append(f"# {skill['description']}\n")
-            lines.append(skill["content"])
-            lines.append("\n\n")
-        lines.append("[END SKILLS]\n\n[TASK]\n")
-        return "".join(lines)
+    def _render_skills(skills: List[dict]) -> str:
+        header = (
+            "---\n"
+            "**Behavioral skills:** before each action, scan the skill descriptions "
+            "below. If a skill's 'When to use' matches your current task or the action "
+            "you are about to take, follow its guidance. Skip skills that do not match.\n"
+        )
+        blocks = []
+        for s in skills:
+            name = s["name"]
+            desc = s.get("description", "")
+            content = s.get("content", "")
+            desc_line = f"*When to use: {desc}*\n" if desc else ""
+            blocks.append(f"### {name}\n{desc_line}\n{content}")
+        return header + "\n\n".join(blocks)

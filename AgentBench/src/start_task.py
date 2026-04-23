@@ -105,6 +105,11 @@ if __name__ == "__main__":
 
     config = ConfigLoader().load_from(args.config)
 
+    if args.controller_port == 5001 and "controller_port" in config:
+        args.controller_port = int(config["controller_port"])
+    if args.port == 5002 and "base_port" in config:
+        args.port = int(config["base_port"])
+
     root = os.path.dirname(os.path.abspath(__file__))
 
     if args.controller:

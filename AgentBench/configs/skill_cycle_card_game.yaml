@@ -41,10 +41,11 @@ skills:
 # Card Game uses a single shared socket — concurrent samples would cross-wire sessions.
 cycle:
   epochs: 5
-  update_every: 12        # 2 batches per epoch over 24 dev samples
+  update_every: 24        # 1 batch per epoch (full epoch) over 24 dev samples
   batch_concurrency: 1   # shared socket serializes all games; concurrency > 1 breaks sessions
   max_proposals: 1       # one change per proposal call; best-of-K selects the winner
   max_learned_skills: 10
   grpo_k: 4              # candidate proposals sampled per update
   grpo_eval_n: 12        # balanced probe set (6 wins/losses target)
-  run_baseline: true    # run a silent val eval before epoch 0
+  run_baseline: true     # run a silent val eval before epoch 0
+  proposal_temperature: 0.8  # high temperature for diverse skill proposals (separate from agent temperature)

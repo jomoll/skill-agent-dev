@@ -4,7 +4,7 @@ Self-improving LLM agent framework using a GRPO-inspired skill cycle. Agents lea
 
 ```
 emnlp26/
-├── AgentBench/        # OS Interaction, DBBench, LTP, Card Game skill cycles
+├── AgentBench/        # OS Interaction, DBBench, LTP, Card Game, ALFWorld skill cycles
 └── MedAgentBench/     # FHIR medical records skill cycle
 ```
 
@@ -22,7 +22,7 @@ After each batch of task episodes, a skill-writing LLM observes the agent's fail
 - [Docker](https://www.docker.com/) installed and running
 - Google Cloud credentials for Vertex AI (`gcloud auth application-default login`)
 
-### 1. AgentBench (OS Interaction + DBBench + LTP + Card Game)
+### 1. AgentBench (OS Interaction + DBBench + LTP + Card Game + ALFWorld)
 
 ```bash
 cd AgentBench
@@ -48,6 +48,9 @@ docker pull longinyu/agentbench-ltp
 
 # Card Game
 docker pull longinyu/agentbench-card_game
+
+# ALFWorld
+docker pull longinyu/agentbench-alfworld
 ```
 
 ### 2. MedAgentBench
@@ -79,10 +82,11 @@ All benchmarks use separate controller ports and can run in parallel.
 
 | Benchmark | Controller port | Worker base port |
 |---|---|---|
-| OS Interaction | 5001 | 5002 |
+| OS Interaction | 5040 | 5041 |
 | DBBench | 5010 | 5011 |
 | LTP | 5020 | 5021 |
 | Card Game | 5030 | 5031 |
+| ALFWorld | 5060 | 5061 |
 | MedAgentBench | 5001 (default) | 5002 |
 
 ### OS Interaction
@@ -138,6 +142,17 @@ python -m src.start_task -a --config configs/start_skill_task_card_game.yaml --c
 python -m src.skill_cycle --config configs/skill_cycle_card_game.yaml --run-name run_001
 ```
 
+### ALFWorld
+
+```bash
+# Terminal 1 — start task worker
+cd AgentBench && conda activate agent-bench
+python -m src.start_task -a --config configs/start_skill_task_alfworld.yaml --controller-port 5060 --base-port 5061
+
+# Terminal 2 — run skill cycle
+python -m src.skill_cycle --config configs/skill_cycle_alfworld.yaml --run-name run_001
+```
+
 ### MedAgentBench
 
 ```bash
@@ -172,6 +187,7 @@ python -m src.run_manual_skills --config configs/manual_skills_dbbench.yaml --sp
 | OS Interaction | 79 | 56 | 35 | 60/40 of worlds 1–5,7 stratified per world; world 6 + dev.json held out |
 | LTP | 30 | 20 | 20 | 60/40 of standard.xlsx; dev.xlsx held out |
 | Card Game | 24 | 16 | — | Stratified 60/40 by (baseline, agent_position); procedurally generated |
+| ALFWorld | 30 | 20 | — | Stratified 60/40 of standard.json |
 
 Regenerate splits:
 
@@ -195,6 +211,7 @@ Key config files:
 | `AgentBench/configs/skill_cycle_dbbench.yaml` | DBBench skill cycle hyperparameters |
 | `AgentBench/configs/skill_cycle_ltp.yaml` | LTP skill cycle hyperparameters |
 | `AgentBench/configs/skill_cycle_card_game.yaml` | Card Game skill cycle hyperparameters |
+| `AgentBench/configs/skill_cycle_alfworld.yaml` | ALFWorld skill cycle hyperparameters |
 | `MedAgentBench/configs/skill_cycle.yaml` | MedAgentBench skill cycle hyperparameters |
 | `AgentBench/configs/agents/gemini-chat.yaml` | Vertex AI Gemini agent config |
 | `MedAgentBench/configs/agents/vertex-gemini.yaml` | Vertex AI Gemini agent config |
@@ -213,6 +230,7 @@ AgentBench/skills/
 ├── dbbench/base/       # read-only DBBench base skills
 ├── ltp/base/           # read-only LTP base skills
 ├── card_game/base/     # read-only Card Game base skills
+├── alfworld/base/      # read-only ALFWorld base skills
 └── base/               # shared skeleton template
 
 MedAgentBench/skills/

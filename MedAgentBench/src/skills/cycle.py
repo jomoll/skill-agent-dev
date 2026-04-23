@@ -35,7 +35,7 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from src.client.agents.skill_aware_agent import SkillAwareAgent
 from src.client.task import TaskClient
@@ -375,8 +375,17 @@ class SkillCycleRunner:
         # Wrap base agent with skill injection only — execution chain is clean
         self.skill_aware_agent = SkillAwareAgent(base_agent, self.skill_repo)
 
-        # Updater uses the same base agent (not skill-aware — updater has its own prompt)
-        self.updater = SkillUpdater(base_agent, max_proposals=self.max_proposals,
+        # Updater uses a separate agent — optionally at higher temperature for diversity
+        proposal_temp = cycle_cfg.get("proposal_temperature")
+        if proposal_temp is not None:
+            from copy import deepcopy
+            proposal_agent_cfg = deepcopy(config["agent"])
+            proposal_agent_cfg["parameters"]["body"]["temperature"] = proposal_temp
+            proposal_agent = InstanceFactory(**proposal_agent_cfg).create()
+            print(f"[SkillCycle] proposal agent temperature: {proposal_temp}")
+        else:
+            proposal_agent = base_agent
+        self.updater = SkillUpdater(proposal_agent, max_proposals=self.max_proposals,
                                     max_learned_skills=self.max_learned_skills)
 
         # Val learning-curve log
@@ -407,11 +416,12 @@ class SkillCycleRunner:
             baseline_score = self._evaluate_val(epoch="baseline", epoch_dir=baseline_dir)
             print(f"[Baseline] Val: {baseline_score:.1%}")
 
+        prev_taxonomy: Dict[str, str] = {}
         for epoch in range(self.epochs):
             print(f"\n{'='*60}")
             print(f"  EPOCH {epoch}")
             print(f"{'='*60}")
-            self._run_epoch(epoch)
+            prev_taxonomy = self._run_epoch(epoch, prev_taxonomy=prev_taxonomy)
 
         print("\n[SkillCycle] Training complete.")
         self._print_learning_curve()
@@ -437,7 +447,7 @@ class SkillCycleRunner:
                     pass
         return results
 
-    def _run_epoch(self, epoch: int) -> None:
+    def _run_epoch(self, epoch: int, prev_taxonomy: Optional[Dict[str, str]] = None) -> Dict[str, str]:
         epoch_dir = self.run_dir / f"epoch_{epoch}"
         epoch_dir.mkdir(parents=True, exist_ok=True)
 
@@ -445,6 +455,7 @@ class SkillCycleRunner:
         updates_path = epoch_dir / "skill_updates.json"
 
         prev_results = self._load_prev_results(epoch)
+        epoch_taxonomy: Dict[str, str] = dict(prev_taxonomy or {})
 
         # Shuffle dev set with fixed seed per epoch
         rng = random.Random(epoch)
@@ -488,13 +499,15 @@ class SkillCycleRunner:
 
             # Grouped proposal ranking / best-of-K skill update
             print(f"  Running grouped proposal ranking update (K={self.grpo_k})...")
-            applied, grpo_log, raw_proposals = self._grpo_skill_update(
+            applied, grpo_log, raw_proposals, batch_new_labels = self._grpo_skill_update(
                 current_entries=entries,
                 all_entries=all_entries,
                 prev_results=prev_results,
                 epoch=epoch,
                 update_cycle=update_cycle,
+                prev_taxonomy=epoch_taxonomy,
             )
+            epoch_taxonomy.update(batch_new_labels)
 
             # Annotate the last batch's entries with what was applied
             for e in entries:
@@ -517,6 +530,9 @@ class SkillCycleRunner:
         with open(updates_path, "w", encoding="utf-8") as f:
             json.dump(update_events, f, indent=2, ensure_ascii=False)
 
+        with open(epoch_dir / "failure_taxonomy.json", "w", encoding="utf-8") as f:
+            json.dump(epoch_taxonomy, f, indent=2, ensure_ascii=False)
+
         # Silent val evaluation
         epoch_correct = sum(e["is_correct"] for e in all_entries)
         epoch_total = len(all_entries)
@@ -525,6 +541,7 @@ class SkillCycleRunner:
         print(f"\n[Epoch {epoch}] Dev: {epoch_correct}/{epoch_total} "
               f"({epoch_correct/epoch_total:.1%}) | "
               f"Val: {val_score:.1%}")
+        return epoch_taxonomy
 
     # ------------------------------------------------------------------
     # Grouped proposal ranking / best-of-K skill update
@@ -537,16 +554,8 @@ class SkillCycleRunner:
         prev_results: Optional[Dict[str, bool]],
         epoch: int,
         update_cycle: int,
+        prev_taxonomy: Optional[Dict[str, str]] = None,
     ):
-        """
-        Sample K single-change proposals, evaluate each on a balanced probe set,
-        apply the one with the best weighted score. Regressions caused by
-        `agent invalid action` are penalized more strongly than ordinary
-        regressions. If no proposal improves on the baseline (score ≤ 0),
-        nothing is applied.
-
-        Returns (applied: List[Dict], grpo_log: List[Dict]).
-        """
         rng = random.Random(epoch * 1000 + update_cycle)
         id_to_sample = {s["id"]: s for s in self.dev_data}
 
@@ -556,7 +565,7 @@ class SkillCycleRunner:
         if probe_set is None:
             print("  [ProposalRanking] skipping update: no out-of-sample probe data "
                   "(epoch 0, batch 0)")
-            return [], [], []
+            return [], [], [], {}
 
         n_failing = sum(1 for s in probe_set if s["id"] in probe_failing_ids)
         n_passing = len(probe_set) - n_failing
@@ -564,25 +573,39 @@ class SkillCycleRunner:
               f"{n_passing} passing = {len(probe_set)} samples "
               f"(out-of-sample from prior batches)")
 
-        # Sample candidate edits from the current batch only. The updater may
-        # return multiple possible single-edit proposals per call; each
-        # validated edit becomes its own candidate and is ranked independently.
-        # Candidate evaluation still uses the probe set built below.
+        # Baseline probe: run with current skills to calibrate fix/regression counts
+        baseline_fixes, baseline_regressions = self._run_baseline_probe(
+            probe_set, probe_failing_ids
+        )
+
         skill_effectiveness = _compute_skill_effectiveness(all_entries, prev_results)
 
+        # Classify failures then diagnose against current skill library
+        failure_labels, new_labels = self.updater.classify_failures(
+            current_entries, prev_taxonomy=prev_taxonomy
+        )
+        diagnosis = self.updater.diagnose(
+            current_entries, self.skill_repo, failure_labels=failure_labels
+        )
+        proposal_groups = self._group_entries_by_failure_mode(current_entries, failure_labels)
+
         candidates = []
-        all_raw_proposals = []  # collect every proposal before validation
+        all_raw_proposals = []
         for k in range(self.grpo_k):
+            failure_mode, group = proposal_groups[k % len(proposal_groups)]
+            group_ids = {str(e.get("sample_id", "")) for e in group}
+            group_diagnosis = {sid: d for sid, d in diagnosis.items() if sid in group_ids}
             proposals = self.updater.propose(
-                current_entries, self.skill_repo, prev_results=prev_results,
+                group, self.skill_repo, prev_results=prev_results,
                 skill_effectiveness=skill_effectiveness,
+                failure_mode=failure_mode if failure_mode != "unknown" else None,
+                diagnosis=group_diagnosis or None,
             )
             all_raw_proposals.extend(proposals)
             validated = self.updater.validate(proposals, self.skill_repo)
             if validated:
                 candidates.extend(validated)
 
-        # Deduplicate identical proposals
         seen = set()
         unique_candidates = []
         for c in candidates:
@@ -596,103 +619,97 @@ class SkillCycleRunner:
 
         if not unique_candidates:
             print("  [ProposalRanking] no valid proposals, skipping update")
-            return [], [], all_raw_proposals
-
-        # Evaluate each candidate on the probe set
-        def eval_candidate(proposal: Dict):
-            forked = self.skill_repo.fork()
-            try:
-                self.updater.apply([proposal], forked)
-                forked_agent = SkillAwareAgent(
-                    # reuse the same base agent — only the repo differs
-                    self.skill_aware_agent.agent,
-                    forked,
-                )
-                fixes = 0
-                regressions = 0
-                invalid_action_regressions = 0
-
-                def run_probe(sample):
-                    original_index = self._id_to_index[sample["id"]]
-                    result = self.task_client.run_sample(original_index, forked_agent)
-                    from src.client.task import TaskError
-                    if result.error == TaskError.NOT_AVAILABLE.value:
-                        return None
-                    status = result.output.status if result.output else "error"
-                    is_correct = _score_result(sample, result, self.fhir_api_base)
-                    return is_correct, status
-
-                with ThreadPoolExecutor(max_workers=self.batch_concurrency) as pool:
-                    futures = {pool.submit(run_probe, s): s for s in probe_set}
-                    for future in as_completed(futures):
-                        sample = futures[future]
-                        probe_result = future.result()
-                        if probe_result is None:
-                            continue
-                        is_correct, status = probe_result
-                        was_failing = sample["id"] in probe_failing_ids
-                        if was_failing and is_correct:
-                            fixes += 1
-                        elif not was_failing and not is_correct:
-                            regressions += 1
-                            if status == _INVALID_ACTION_STATUS:
-                                invalid_action_regressions += 1
-
-                score = (
-                    fixes
-                    - regressions
-                    - (_INVALID_ACTION_REGRESSION_PENALTY - 1) * invalid_action_regressions
-                )
-                return score, fixes, regressions, invalid_action_regressions
-            finally:
-                forked.cleanup()
+            return [], [], all_raw_proposals, {}
 
         grpo_log = []
-        best_score = 0
+        best_adjusted = 0
         best_candidate = None
         best_stats = (0, 0, 0)
+        best_regressed_traces: List[Dict] = []
 
         for proposal in unique_candidates:
             try:
-                score, fixes, regressions, invalid_action_regressions = eval_candidate(proposal)
+                raw_score, fixes, regressions, invalid_regr, regressed_traces = \
+                    self._eval_candidate(proposal, probe_set, probe_failing_ids)
             except Exception as e:
-                print(f"  [ProposalRanking] eval_candidate failed for "
+                print(f"  [ProposalRanking] eval failed for "
                       f"{proposal.get('action')}::{proposal.get('name')}: {e}")
                 continue
+            adjusted = (
+                (fixes - baseline_fixes)
+                - (regressions - baseline_regressions)
+                - (_INVALID_ACTION_REGRESSION_PENALTY - 1) * invalid_regr
+            )
             action = proposal["action"]
             name = proposal["name"]
             print(
-                f"  [ProposalRanking] {action}::{name} → score={score:+d} "
-                f"(fixes={fixes}, regressions={regressions}, "
-                f"invalid_action_regressions={invalid_action_regressions})"
+                f"  [ProposalRanking] {action}::{name} → "
+                f"adjusted={adjusted:+d} raw={raw_score:+d} "
+                f"(fixes={fixes} baseline_fixes={baseline_fixes}, "
+                f"regressions={regressions} baseline_regressions={baseline_regressions})"
             )
             grpo_log.append({
                 "proposal": proposal,
-                "net": score,
-                "score": score,
+                "net": adjusted,
+                "score": adjusted,
+                "raw_score": raw_score,
                 "fixes": fixes,
                 "regressions": regressions,
-                "invalid_action_regressions": invalid_action_regressions,
+                "invalid_action_regressions": invalid_regr,
+                "baseline_fixes": baseline_fixes,
+                "baseline_regressions": baseline_regressions,
                 "invalid_action_regression_penalty": _INVALID_ACTION_REGRESSION_PENALTY,
             })
-            if score > best_score:
-                best_score = score
+            if adjusted > best_adjusted:
+                best_adjusted = adjusted
                 best_candidate = proposal
-                best_stats = (fixes, regressions, invalid_action_regressions)
+                best_stats = (fixes, regressions, invalid_regr)
+                best_regressed_traces = regressed_traces
 
         if best_candidate is None:
-            print("  [ProposalRanking] no proposal improved weighted score — applying nothing")
-            return [], grpo_log, all_raw_proposals
+            print("  [ProposalRanking] no proposal improved adjusted score — applying nothing")
+            return [], grpo_log, all_raw_proposals, {}
 
         print(f"  [ProposalRanking] winner: {best_candidate['action']}::{best_candidate['name']} "
-              f"score={best_score:+d} (fixes={best_stats[0]}, "
-              f"regressions={best_stats[1]}, invalid_action_regressions={best_stats[2]})")
+              f"adjusted={best_adjusted:+d} (fixes={best_stats[0]}, "
+              f"regressions={best_stats[1]})")
+
+        # Contrastive revision: if the winner has regressions, attempt a targeted fix
+        if best_regressed_traces:
+            revised = self._contrastive_revision(
+                best_candidate, best_regressed_traces,
+                probe_set, probe_failing_ids,
+                baseline_fixes, baseline_regressions,
+            )
+            if revised is not None:
+                rev_candidate, rev_adjusted, rev_fixes, rev_regressions, rev_invalid = revised
+                grpo_log.append({
+                    "proposal": rev_candidate,
+                    "net": rev_adjusted,
+                    "score": rev_adjusted,
+                    "fixes": rev_fixes,
+                    "regressions": rev_regressions,
+                    "invalid_action_regressions": rev_invalid,
+                    "baseline_fixes": baseline_fixes,
+                    "baseline_regressions": baseline_regressions,
+                    "contrastive_revision": True,
+                })
+                if rev_adjusted > best_adjusted:
+                    print(f"  [ContrastiveRevision] revision wins: "
+                          f"adjusted={rev_adjusted:+d} > {best_adjusted:+d}")
+                    best_candidate = rev_candidate
+                    best_adjusted = rev_adjusted
+                    best_stats = (rev_fixes, rev_regressions, rev_invalid)
+                else:
+                    print(f"  [ContrastiveRevision] revision did not improve "
+                          f"({rev_adjusted:+d} ≤ {best_adjusted:+d}), keeping original")
+
         winner = dict(best_candidate)
         winner["_provenance"] = {
             "epoch": epoch,
             "update_cycle": update_cycle,
             "action": winner["action"],
-            "probe_score": best_score,
+            "probe_score": best_adjusted,
             "fixes": best_stats[0],
             "regressions": best_stats[1],
             "triggering_sample_ids": [
@@ -700,7 +717,202 @@ class SkillCycleRunner:
             ][:10],
         }
         applied = self.updater.apply([winner], self.skill_repo)
-        return applied, grpo_log, all_raw_proposals
+        return applied, grpo_log, all_raw_proposals, new_labels
+
+    # ------------------------------------------------------------------
+    # Candidate evaluation helpers
+    # ------------------------------------------------------------------
+
+    def _eval_candidate(
+        self,
+        proposal: Dict,
+        probe_set: List[Dict],
+        probe_failing_ids: set,
+    ) -> Tuple[int, int, int, int, List[Dict]]:
+        """
+        Fork the skill repo, apply proposal, run probe set.
+        Returns (raw_score, fixes, regressions, invalid_action_regressions, regressed_traces).
+        """
+        forked = self.skill_repo.fork()
+        try:
+            self.updater.apply([proposal], forked)
+            forked_agent = SkillAwareAgent(self.skill_aware_agent.agent, forked)
+            fixes = 0
+            regressions = 0
+            invalid_action_regressions = 0
+            regressed_traces: List[Dict] = []
+
+            def run_probe(sample):
+                original_index = self._id_to_index[sample["id"]]
+                result = self.task_client.run_sample(original_index, forked_agent)
+                from src.client.task import TaskError
+                if result.error == TaskError.NOT_AVAILABLE.value:
+                    return None
+                status = result.output.status if result.output else "error"
+                is_correct = _score_result(sample, result, self.fhir_api_base)
+                agent_actions = []
+                history = []
+                if result.output and result.output.history:
+                    for msg in result.output.history:
+                        role = msg.role if hasattr(msg, "role") else msg.get("role")
+                        content = msg.content if hasattr(msg, "content") else msg.get("content", "")
+                        history.append({"role": role, "content": content})
+                        if role == "agent":
+                            agent_actions.append(content)
+                return is_correct, status, agent_actions, history
+
+            with ThreadPoolExecutor(max_workers=self.batch_concurrency) as pool:
+                futures = {pool.submit(run_probe, s): s for s in probe_set}
+                for future in as_completed(futures):
+                    sample = futures[future]
+                    probe_result = future.result()
+                    if probe_result is None:
+                        continue
+                    is_correct, status, agent_actions, history = probe_result
+                    was_failing = sample["id"] in probe_failing_ids
+                    if was_failing and is_correct:
+                        fixes += 1
+                    elif not was_failing and not is_correct:
+                        regressions += 1
+                        if status == _INVALID_ACTION_STATUS:
+                            invalid_action_regressions += 1
+                        regressed_traces.append({
+                            "sample_id": sample["id"],
+                            "instruction": sample.get("instruction", sample.get("description", "")),
+                            "is_correct": False,
+                            "status": status,
+                            "agent_actions": agent_actions,
+                            "history": history,
+                            "skill_snapshot_before": [],
+                        })
+
+            raw_score = (
+                fixes
+                - regressions
+                - (_INVALID_ACTION_REGRESSION_PENALTY - 1) * invalid_action_regressions
+            )
+            return raw_score, fixes, regressions, invalid_action_regressions, regressed_traces
+        finally:
+            forked.cleanup()
+
+    def _run_baseline_probe(
+        self,
+        probe_set: List[Dict],
+        probe_failing_ids: set,
+    ) -> Tuple[int, int]:
+        """
+        Run the probe set with the current (unmodified) skill library to get a
+        causal baseline. Returns (baseline_fixes, baseline_regressions).
+        """
+        baseline_fixes = 0
+        baseline_regressions = 0
+
+        def run_one(sample):
+            original_index = self._id_to_index[sample["id"]]
+            result = self.task_client.run_sample(original_index, self.skill_aware_agent)
+            from src.client.task import TaskError
+            if result.error == TaskError.NOT_AVAILABLE.value:
+                return None
+            return _score_result(sample, result, self.fhir_api_base)
+
+        with ThreadPoolExecutor(max_workers=self.batch_concurrency) as pool:
+            futures = {pool.submit(run_one, s): s for s in probe_set}
+            for future in as_completed(futures):
+                sample = futures[future]
+                is_correct = future.result()
+                if is_correct is None:
+                    continue
+                was_failing = sample["id"] in probe_failing_ids
+                if was_failing and is_correct:
+                    baseline_fixes += 1
+                elif not was_failing and not is_correct:
+                    baseline_regressions += 1
+
+        print(f"  [ProposalRanking] baseline probe: "
+              f"{baseline_fixes} fixes, {baseline_regressions} regressions "
+              f"(current skills, no proposal)")
+        return baseline_fixes, baseline_regressions
+
+    def _contrastive_revision(
+        self,
+        best_candidate: Dict,
+        regressed_traces: List[Dict],
+        probe_set: List[Dict],
+        probe_failing_ids: set,
+        baseline_fixes: int,
+        baseline_regressions: int,
+    ) -> Optional[Tuple[Dict, int, int, int, int]]:
+        """
+        Ask the updater to revise the winning proposal to avoid regressions,
+        then evaluate the revision. Returns
+        (revised_proposal, adjusted_score, fixes, regressions, invalid_regr)
+        or None if revision fails, is invalid, or doesn't improve the score.
+        """
+        print(f"  [ContrastiveRevision] {len(regressed_traces)} regression(s) — "
+              f"requesting targeted revision...")
+        raw_revisions = self.updater.revise(best_candidate, regressed_traces, self.skill_repo)
+        if not raw_revisions:
+            print("  [ContrastiveRevision] no revision proposed")
+            return None
+
+        validated = self.updater.validate(raw_revisions, self.skill_repo)
+        if not validated:
+            print("  [ContrastiveRevision] revision failed validation")
+            return None
+
+        revision = validated[0]
+        try:
+            raw_score, fixes, regressions, invalid_regr, _ = self._eval_candidate(
+                revision, probe_set, probe_failing_ids
+            )
+            adjusted = (
+                (fixes - baseline_fixes)
+                - (regressions - baseline_regressions)
+                - (_INVALID_ACTION_REGRESSION_PENALTY - 1) * invalid_regr
+            )
+            print(
+                f"  [ContrastiveRevision] {revision['action']}::{revision['name']} → "
+                f"adjusted={adjusted:+d} (fixes={fixes}, regressions={regressions})"
+            )
+            return revision, adjusted, fixes, regressions, invalid_regr
+        except Exception as e:
+            print(f"  [ContrastiveRevision] eval failed: {e}")
+            return None
+
+    # ------------------------------------------------------------------
+    # Failure-mode grouping for proposal diversity
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _group_entries_by_failure_mode(
+        entries: List[Dict],
+        labels: Dict[str, str],
+    ) -> List[tuple]:
+        """
+        Group failing entries by their failure mode label so each proposal call
+        sees a homogeneous set of failures. Passing entries are appended to every
+        group to give the proposer context on what's working.
+        Returns list of (label, group_entries) sorted by group size descending.
+        Falls back to [("unknown", entries)] if no labels were produced.
+        """
+        if not labels:
+            return [("unknown", entries)]
+
+        passing = [e for e in entries if e.get("is_correct", False)]
+        groups: Dict[str, List[Dict]] = {}
+        for e in entries:
+            if e.get("is_correct", False):
+                continue
+            label = labels.get(str(e.get("sample_id", "")), "unlabeled")
+            groups.setdefault(label, []).append(e)
+
+        if not groups:
+            return [("unknown", entries)]
+
+        return [
+            (label, group + passing)
+            for label, group in sorted(groups.items(), key=lambda x: len(x[1]), reverse=True)
+        ]
 
     # ------------------------------------------------------------------
     # Probe set construction
@@ -747,8 +959,9 @@ class SkillCycleRunner:
           1. Entries from earlier batches of the current epoch
              (update_cycle < current update_cycle).
           2. For batch 0 of epoch > 0: use prev epoch results as the baseline.
-          3. Epoch 0, batch 0 — no out-of-sample data exists → return (None, None)
-             and the caller skips the update entirely.
+          3. Epoch 0, batch 0: use the current batch's own entries. Not circular —
+             the probe runs fresh agent calls with proposed skills, not cached outputs.
+             Only meaningful when update_every >= len(dev) (full-epoch batches).
 
         Returns (probe_samples, probe_failing_ids) or (None, None).
         """
@@ -792,7 +1005,24 @@ class SkillCycleRunner:
             )
             return (probe, failing_ids) if probe else (None, None)
 
-        return None, None  # epoch 0, batch 0 — skip update
+        # Epoch 0, batch 0: use current batch entries as probe.
+        if all_entries:
+            failing = [e for e in all_entries if not e["is_correct"]]
+            passing = [e for e in all_entries if e["is_correct"]]
+            probe_failing_ids = {e["sample_id"] for e in failing}
+            probe = (
+                self._stratified_sample(
+                    [id_to_sample[e["sample_id"]] for e in failing if e["sample_id"] in id_to_sample],
+                    type_key, half, rng,
+                )
+                + self._stratified_sample(
+                    [id_to_sample[e["sample_id"]] for e in passing if e["sample_id"] in id_to_sample],
+                    type_key, half, rng,
+                )
+            )
+            return (probe, probe_failing_ids) if probe else (None, None)
+
+        return None, None
 
     # ------------------------------------------------------------------
     # Batch execution (parallel)

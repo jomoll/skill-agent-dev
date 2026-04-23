@@ -18,8 +18,7 @@ def _build_task_prompt(api_base: str, functions: list, context: str, question: s
             "description": question,
             "context": (context + "\n" if context else "") + f"Current time: {_TASK_CURRENT_TIME}",
         },
-        "selected_skills": [],       # populated by SkillAwareAgent at inference time
-        "skill_documentation": {},   # populated by SkillAwareAgent at inference time
+        "behavioral_skills": "",     # populated by SkillAwareAgent at inference time
         "api": {
             "base_url": api_base,
             "functions": functions,

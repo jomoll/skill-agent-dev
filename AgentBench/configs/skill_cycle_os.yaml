@@ -47,3 +47,4 @@ cycle:
   grpo_k: 4               # candidate proposals sampled per update
   grpo_eval_n: 20         # probe set size: grpo_eval_n/2 failing + grpo_eval_n/2 passing
   run_baseline: true      # run a silent val eval before epoch 0
+  proposal_temperature: 0.8  # high temperature for diverse skill proposals (separate from agent temperature)

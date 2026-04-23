@@ -210,6 +210,7 @@ class HTTPAgent(AgentClient):
         max_retries: int = 10,
         retry_base_delay: float = 5.0,
         retry_max_delay: float = 120.0,
+        timeout: int = 120,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -222,6 +223,7 @@ class HTTPAgent(AgentClient):
         self.max_retries = max_retries
         self.retry_base_delay = retry_base_delay
         self.retry_max_delay = retry_max_delay
+        self.timeout = timeout
         if not self.url:
             raise Exception("Please set 'url' parameter")
 
@@ -235,7 +237,7 @@ class HTTPAgent(AgentClient):
                 body.update(self._handle_history(history))
                 with no_ssl_verification():
                     resp = requests.post(
-                        self.url, json=body, headers=self.headers, proxies=self.proxies, timeout=120
+                        self.url, json=body, headers=self.headers, proxies=self.proxies, timeout=self.timeout
                     )
                 if resp.status_code == 429:
                     wait = _parse_retry_delay(
