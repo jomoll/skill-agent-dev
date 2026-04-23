@@ -161,10 +161,10 @@ docker run -p 8080:8080 medagentbench
 
 # Terminal 2 — start task worker
 cd MedAgentBench && conda activate medagentbench
-python -m src.start_task -a --config configs/start_skill_task.yaml
+python -m src.start_task -a --config configs/start_task.yaml
 
 # Terminal 3 — run skill cycle
-python -m src.skill_cycle --config configs/skill_cycle.yaml --run-name run_001
+python -m src.skill_cycle --config configs/skill_cycle_local.yaml --run-name run_001
 ```
 
 ### Evaluating with a manual skill pack
