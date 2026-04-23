@@ -30,6 +30,12 @@ package-lock.json
 *.ipynb
 .ipynb_checkpoints/
 
+# AgentBench Gemini/Vertex configs (contain GCP project IDs)
+AgentBench/configs/agents/gemini-chat.yaml
+AgentBench/configs/agents/ltp_eval_vertex.yaml
+AgentBench/configs/skill_cycle.yaml
+AgentBench/configs/manual_skills_dbbench.yaml
+
 # Misc AgentBench legacy
 AgentBench/logs/
 AgentBench/results/

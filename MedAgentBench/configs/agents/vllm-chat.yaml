@@ -1,0 +1,14 @@
+module: src.client.agents.http_agent.HTTPAgent
+parameters:
+  url: "http://10.32.16.43:4000/v1/chat/completions"
+  headers:
+    Content-Type: application/json
+    Authorization: Bearer pbzeeughofeanjey
+  body:
+    temperature: 0.2
+    max_tokens: 8192
+  prompter:
+    name: role_content_dict
+    args:
+      agent_role: assistant
+  return_format: "{response[choices][0][message][content]}"

@@ -12,6 +12,10 @@
 !skills/
 !skills/**
 
+# Keep configs tracked too.
+!configs/
+!configs/**
+
 # Still ignore common Python cache files if they appear inside src.
 src/**/__pycache__/
 src/**/*.py[cod]
