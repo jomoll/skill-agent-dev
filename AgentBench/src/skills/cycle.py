@@ -383,7 +383,11 @@ class SkillCycleRunner:
         proposal_temp = cycle_cfg.get("proposal_temperature")
         if proposal_temp is not None:
             proposal_agent_cfg = deepcopy(config["agent"])
-            proposal_agent_cfg["parameters"]["body"]["temperature"] = proposal_temp
+            params = proposal_agent_cfg["parameters"]
+            if "body" in params:
+                params["body"]["temperature"] = proposal_temp
+            else:
+                params["temperature"] = proposal_temp
             proposal_agent = InstanceFactory(**proposal_agent_cfg).create()
             print(f"[SkillCycle] proposal agent temperature: {proposal_temp}")
         else:

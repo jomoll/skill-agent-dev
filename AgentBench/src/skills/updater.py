@@ -319,6 +319,7 @@ Rules:
   3. Why would that flip at least one failing sample in this batch?
   4. Is this already covered by an existing learned skill?
 - Skills should prefer realistic example identifiers from the trace pattern over placeholders like `table_name` and `column1`, but must remain mechanism-level and reusable.
+- NEVER propose a metacognitive or behavioral-monitoring skill. A metacognitive skill is any skill whose primary instruction is to "verify before finishing", "check whether the task is complete", "avoid looping", "ensure you have done X", "stop when done", "suppress preamble", or any form of self-monitoring. The agent already knows these rules; they cannot override generative behavior through text injection and only add noise. If the observed failure is looping, over-analysis, premature termination, or repetitive output, return [] rather than proposing a behavioral skill. Valid skills must prescribe a SPECIFIC COMMAND, QUERY PATTERN, PARSING STEP, or ENVIRONMENT-SPECIFIC MECHANIC that is demonstrably absent from the failing trace.
 - If there is not enough evidence for a good edit, return [].
 """.strip()
 

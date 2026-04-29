@@ -1,8 +1,14 @@
 """
 SkillAwareAgent — wraps any AgentClient and injects the current skill library
-into the first user message before each inference call.
+into the LAST user message before each inference call.
 
-Skills are appended as a plain-text block after the original prompt content.
+Skills are appended as a plain-text block after the most recent user message
+content (i.e. the most recent environment observation). Injecting at the last
+user turn — rather than the first — keeps the skill block close to the point
+where the model decides its next action. In long multi-turn trajectories (OS
+interaction, ALFWorld) the first message can be 15–20 turns back, well outside
+the model's effective attention window.
+
 Each skill is introduced by its description so the model can judge applicability
 at a glance; the full content follows for when the skill is relevant.
 
@@ -39,10 +45,19 @@ class SkillAwareAgent(AgentClient):
         if is_dbbench:
             suffix_parts.append(self._dbbench_protocol())
 
+        suffix = "\n\n" + "\n\n".join(suffix_parts)
+
+        # Inject into the last user message so the skill block stays close to
+        # the model's current decision point. In multi-turn tasks the first
+        # message can be many turns back and receives little attention.
         modified = list(history)
-        modified[0] = {
+        last_user_idx = max(
+            (i for i, m in enumerate(modified) if m.get("role") == "user"),
+            default=0,
+        )
+        modified[last_user_idx] = {
             "role": "user",
-            "content": first_content + "\n\n" + "\n\n".join(suffix_parts),
+            "content": modified[last_user_idx]["content"] + suffix,
         }
         return self.agent.inference(modified)
 
