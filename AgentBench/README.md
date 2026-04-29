@@ -182,6 +182,30 @@ python -m src.skill_cycle --config configs/skill_cycle_alfworld.yaml --run-name 
 
 The ALFWorld skill-cycle uses a stratified 60/40 split of `data/alfworld/standard.json` (30 dev + 20 val samples covering all 6 task types). Learned skills are written to `skills/alfworld/base/`.
 
+### Skill-cycle (Mind2Web) quick start
+
+Pull the Mind2Web Docker image first (requires network access):
+
+```bash
+docker pull longinyu/agentbench-mind2web
+```
+
+Start the task worker on `5070+` (avoids conflicts with OS, LTP, Card Game, DBBench, and ALFWorld workers):
+
+```bash
+python -m src.start_task -a --config configs/start_skill_task_mind2web.yaml --controller-port 5070 --base-port 5071
+```
+
+**Note:** the Mind2Web image takes ~5 minutes to initialise. Wait until the terminal shows `... 200 OK` before continuing.
+
+Then in a separate terminal run the skill-learning cycle:
+
+```bash
+python -m src.skill_cycle --config configs/skill_cycle_mind2web.yaml --run-name run_001 --force
+```
+
+The Mind2Web skill-cycle uses a 60/40 split of the first 100 samples from the dev set (indices 0–59 for skill learning, 60–99 for validation). Success is measured by step success rate: the agent must select the correct DOM element **and** produce a perfect-F1 action string. Learned skills are written to `skills/mind2web/base/`.
+
 ## Next Steps
 
 If you wish to launch more tasks or use other models, you can refer to the content

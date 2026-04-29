@@ -1,1 +1,4 @@
-from .task import Mind2Web
+try:
+    from .task import Mind2Web
+except ImportError:
+    pass

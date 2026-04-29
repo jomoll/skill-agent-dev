@@ -1,0 +1,16 @@
+# Start the Mind2Web task worker for the skill-learning cycle.
+#
+# Usage:
+#   python -m src.start_task -a --config configs/start_skill_task_mind2web.yaml --controller-port 5070 --base-port 5071
+#
+# Then in a separate terminal:
+#   python -m src.skill_cycle --config configs/skill_cycle_mind2web.yaml --run-name run_001
+#
+# Note: the longinyu/agentbench-mind2web Docker image takes ~5 minutes to start.
+# Wait until the terminal shows "... 200 OK" before launching the skill cycle.
+
+definition:
+  import: tasks/task_assembly.yaml
+
+start:
+  mind2web-skill: 1

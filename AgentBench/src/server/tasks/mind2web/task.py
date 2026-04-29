@@ -1,3 +1,4 @@
+import copy
 import json
 import numpy as np
 import pickle
@@ -173,6 +174,7 @@ class Mind2Web(Task):
         random.shuffle(all_candidates)
         final_prediction = None
         outputs = []
+        prompt_template = copy.deepcopy(self.prompt_template)
         while len(all_candidates) > 1:
             candidate_ids = all_candidates[:self.candidates_num]  # 5
             all_candidates = all_candidates[self.candidates_num:]
@@ -180,10 +182,17 @@ class Mind2Web(Task):
                 sample, candidate_ids, -1, keep_html_brackets=True
             )
             outputs.append([candidate_ids, [seq_context, seq_in, choices], None])
-            self.prompt_template[-1]["content"] = f"'''\n{seq_context}\n'''\n\n{seq_in}"
+            prompt_template[-1]["content"] = (
+                f"'''\n{seq_context}\n'''\n\n{seq_in}"
+                "\n\nRespond in this exact format:\n"
+                "Thought: [your reasoning]\n"
+                "Answer: [A-F].\n"
+                "Action: CLICK, SELECT, or TYPE  (required when Answer is not A)\n"
+                "Value: [text]  (required for SELECT and TYPE; omit for CLICK)"
+            )
 
             session.history = []
-            output = await fetch_data(session, self.prompt_template)
+            output = await fetch_data(session, prompt_template)
             if output.status == AgentOutputStatus.AGENT_CONTEXT_LIMIT:
                 finish_reason = SampleStatus.AGENT_CONTEXT_LIMIT
                 break
@@ -204,9 +213,23 @@ class Mind2Web(Task):
         if final_prediction is None or len(all_candidates) == 0:
             finish_reason = SampleStatus.AGENT_INVALID_ACTION
             final_prediction = ("", "")
+
+        target = self.data[index][1]
+        element_correct = False
+        step_sr = 0
+        if target is not None and final_prediction[0]:
+            element_correct = final_prediction[0] in target["element"]
+            action_f1 = self.calculate_f1(final_prediction[1], target["action"])
+            step_sr = 1 if (element_correct and action_f1 >= 1.0) else 0
+
         return TaskSampleExecutionResult(
             status=finish_reason,
-            result={"final_prediction": final_prediction, "outputs": outputs},
+            result={
+                "final_prediction": final_prediction,
+                "outputs": outputs,
+                "element_correct": element_correct,
+                "step_sr": step_sr,
+            },
         )
 
     @staticmethod

@@ -36,6 +36,7 @@ import importlib
 import io
 import json
 import random
+import shutil
 from copy import deepcopy
 import sys
 import time
@@ -52,6 +53,7 @@ from src.typings import TaskClientOutput
 
 _INVALID_ACTION_STATUS = "agent invalid action"
 _INVALID_ACTION_REGRESSION_PENALTY = 2
+_DEV_COLLAPSE_THRESHOLD = 0.05  # trigger recovery when epoch dev_score drops below 5%
 
 
 def _compute_skill_effectiveness(
@@ -393,6 +395,11 @@ class SkillCycleRunner:
 
         self._val_scores_path = self.run_dir / "val_scores.json"
 
+        # Best-checkpoint tracking: snapshot learned/ whenever val improves
+        self._best_val_score: float = 0.0
+        self._best_checkpoint_label: Any = None
+        self._best_skills_dir: Path = self.run_dir / "skills" / "best"
+
     # ------------------------------------------------------------------
     # Public entry point
     # ------------------------------------------------------------------
@@ -417,15 +424,26 @@ class SkillCycleRunner:
             baseline_dir.mkdir(exist_ok=True)
             baseline_score = self._evaluate_val(epoch="baseline", epoch_dir=baseline_dir)
             print(f"[Baseline] Val: {baseline_score:.1%}")
+            self._maybe_update_best_checkpoint(baseline_score, "baseline")
 
         prev_taxonomy: Dict[str, str] = {}
         for epoch in range(self.epochs):
             print(f"\n{'='*60}")
             print(f"  EPOCH {epoch}")
             print(f"{'='*60}")
-            prev_taxonomy = self._run_epoch(epoch, prev_taxonomy=prev_taxonomy)
+            # Restore the best known skill set before each epoch so degraded
+            # skill combinations from a bad epoch never compound into the next.
+            self._restore_best_checkpoint()
+            prev_taxonomy, val_score = self._run_epoch(epoch, prev_taxonomy=prev_taxonomy)
+            self._maybe_update_best_checkpoint(val_score, epoch)
 
         print("\n[SkillCycle] Training complete.")
+        restored = self._restore_best_checkpoint()
+        if restored:
+            print(
+                f"[BestCheckpoint] Final skills restored from best checkpoint: "
+                f"epoch={self._best_checkpoint_label}, val={self._best_val_score:.1%}"
+            )
         self._print_learning_curve()
 
     # ------------------------------------------------------------------
@@ -448,7 +466,7 @@ class SkillCycleRunner:
                     pass
         return results
 
-    def _run_epoch(self, epoch: int, prev_taxonomy: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    def _run_epoch(self, epoch: int, prev_taxonomy: Optional[Dict[str, str]] = None) -> Tuple[Dict[str, str], float]:
         epoch_dir = self.run_dir / f"epoch_{epoch}"
         epoch_dir.mkdir(parents=True, exist_ok=True)
 
@@ -518,20 +536,157 @@ class SkillCycleRunner:
             update_events.append(event)
             update_cycle += 1
 
+        epoch_correct = sum(e["is_correct"] for e in all_entries)
+        epoch_total = len(all_entries)
+        dev_score = epoch_correct / epoch_total if epoch_total > 0 else 0.0
+
+        # Dev-collapse recovery: if the full epoch dev_score is near zero and we
+        # have learned skills, programmatically try removing the most recently
+        # added/modified skill before evaluating on val.
+        if (epoch > 0
+                and dev_score < _DEV_COLLAPSE_THRESHOLD
+                and self.skill_repo.learned_count() > 0):
+            recovery_event = self._attempt_dev_collapse_recovery(
+                epoch, all_entries, update_cycle
+            )
+            if recovery_event:
+                update_events.append(recovery_event)
+
         with open(updates_path, "w", encoding="utf-8") as f:
             json.dump(update_events, f, indent=2, ensure_ascii=False)
 
         with open(epoch_dir / "failure_taxonomy.json", "w", encoding="utf-8") as f:
             json.dump(epoch_taxonomy, f, indent=2, ensure_ascii=False)
 
-        epoch_correct = sum(e["is_correct"] for e in all_entries)
-        epoch_total = len(all_entries)
-        dev_score = epoch_correct / epoch_total if epoch_total > 0 else 0.0
         val_score = self._evaluate_val(epoch, epoch_dir, dev_score=dev_score)
         print(f"\n[Epoch {epoch}] Dev: {epoch_correct}/{epoch_total} "
               f"({epoch_correct/epoch_total:.1%}) | "
               f"Val: {val_score:.1%}")
-        return epoch_taxonomy
+        return epoch_taxonomy, val_score
+
+    # ------------------------------------------------------------------
+    # Best-checkpoint management
+    # ------------------------------------------------------------------
+
+    def _maybe_update_best_checkpoint(self, val_score: float, label: Any) -> None:
+        """Snapshot learned/ to skills/best/ whenever val improves."""
+        if val_score > self._best_val_score:
+            self._best_val_score = val_score
+            self._best_checkpoint_label = label
+            if self._best_skills_dir.exists():
+                shutil.rmtree(self._best_skills_dir)
+            shutil.copytree(self.skill_repo.learned_dir, self._best_skills_dir)
+            print(
+                f"[BestCheckpoint] New best: epoch={label}, val={val_score:.1%} — snapshot saved"
+            )
+
+    def _restore_best_checkpoint(self) -> bool:
+        """Replace learned/ with the best-checkpoint snapshot. Returns True if restored."""
+        if not self._best_skills_dir.exists():
+            return False
+        if self.skill_repo.learned_dir.exists():
+            shutil.rmtree(self.skill_repo.learned_dir)
+        shutil.copytree(self._best_skills_dir, self.skill_repo.learned_dir)
+        return True
+
+    # ------------------------------------------------------------------
+    # Dev-collapse recovery
+    # ------------------------------------------------------------------
+
+    def _attempt_dev_collapse_recovery(
+        self,
+        epoch: int,
+        all_entries: List[Dict],
+        update_cycle: int,
+    ) -> Optional[Dict]:
+        """
+        When epoch dev_score is near zero, programmatically try removing the most
+        recently added/modified skill. Evaluates the removal on a probe drawn from
+        the current epoch's entries and applies it if the adjusted score is positive.
+        Returns an update event dict, or None if recovery was not possible/helpful.
+        """
+        skills = self.skill_repo.snapshot()
+        if not skills:
+            return None
+
+        def prov_key(s):
+            prov = s.get("provenance") or {}
+            return (prov.get("epoch", -1), prov.get("update_cycle", -1))
+        most_recent = max(skills, key=prov_key)
+
+        print(
+            f"\n  [CollapseRecovery] dev_score < {_DEV_COLLAPSE_THRESHOLD:.0%} — "
+            f"trying REMOVE::{most_recent['name']}"
+        )
+
+        id_to_sample = {s["id"]: s for s in self.dev_data}
+        rng = random.Random(epoch * 99991)
+        half = self.grpo_eval_n // 2
+        type_key = lambda s: s.get("type", "other")
+        failing = [e for e in all_entries if not e["is_correct"]]
+        passing = [e for e in all_entries if e["is_correct"]]
+        probe_failing_ids = {e["sample_id"] for e in failing}
+        probe_set = (
+            self._stratified_sample(
+                [id_to_sample[e["sample_id"]] for e in failing if e["sample_id"] in id_to_sample],
+                type_key, half, rng,
+            )
+            + self._stratified_sample(
+                [id_to_sample[e["sample_id"]] for e in passing if e["sample_id"] in id_to_sample],
+                type_key, half, rng,
+            )
+        )
+        if not probe_set:
+            print("  [CollapseRecovery] no probe set available, skipping")
+            return None
+
+        baseline_fixes, baseline_regressions = self._run_baseline_probe(probe_set, probe_failing_ids)
+
+        removal_proposal = {
+            "action": "REMOVE",
+            "name": most_recent["name"],
+            "description": "",
+            "content": "",
+        }
+        try:
+            _, fixes, regressions, invalid_regr, _ = self._eval_candidate(
+                removal_proposal, probe_set, probe_failing_ids
+            )
+            adjusted = (
+                (fixes - baseline_fixes)
+                - (regressions - baseline_regressions)
+                - (_INVALID_ACTION_REGRESSION_PENALTY - 1) * invalid_regr
+            )
+            print(
+                f"  [CollapseRecovery] REMOVE::{most_recent['name']} → "
+                f"adjusted={adjusted:+d} (fixes={fixes}, regressions={regressions})"
+            )
+            if adjusted > 0:
+                winner = dict(removal_proposal)
+                winner["_provenance"] = {
+                    "epoch": epoch,
+                    "update_cycle": update_cycle,
+                    "action": "REMOVE",
+                    "probe_score": adjusted,
+                    "recovery": True,
+                }
+                applied = self.updater.apply([winner], self.skill_repo)
+                print(f"  [CollapseRecovery] applied: REMOVE::{most_recent['name']}")
+                return {
+                    "epoch": epoch,
+                    "update_cycle": update_cycle,
+                    "batch_size": 0,
+                    "batch_correct": 0,
+                    "applied": applied,
+                    "raw_proposals": [removal_proposal],
+                    "grpo": [],
+                    "recovery": True,
+                }
+            else:
+                print("  [CollapseRecovery] REMOVE did not improve adjusted score — keeping skill")
+        except Exception as e:
+            print(f"  [CollapseRecovery] eval failed: {e}")
+        return None
 
     # ------------------------------------------------------------------
     # Grouped proposal ranking / best-of-K skill update

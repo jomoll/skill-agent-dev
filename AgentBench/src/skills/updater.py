@@ -219,9 +219,32 @@ def _build_prompt(
 
     editable_names = [s["name"] for s in learned_skills]
     if learned_skills:
-        editable_skill_section = "\n".join(
-            _format_skill_with_stats(s, skill_effectiveness) for s in learned_skills
-        )
+        editable_lines = []
+        for s in learned_skills:
+            editable_lines.append(_format_skill_with_stats(s, skill_effectiveness))
+            history = skill_repo.get_history(s["name"])
+            if history:
+                best_hist = max(
+                    history,
+                    key=lambda h: (h.get("provenance") or {}).get("probe_score", -999),
+                )
+                best_score = (best_hist.get("provenance") or {}).get("probe_score")
+                current_score = (s.get("provenance") or {}).get("probe_score", 0)
+                n_mods = len(history)
+                if best_score is not None and best_score > current_score:
+                    editable_lines.append(
+                        f"    MODIFY-HISTORY WARNING: modified {n_mods} time(s); "
+                        f"best version was v{best_hist.get('version', '?')} "
+                        f"(probe_score={best_score:+d}) but current is "
+                        f"probe_score={current_score:+d} — "
+                        f"each MODIFY has made this skill worse. "
+                        f"Strongly prefer REMOVE + ADD fresh replacement over further MODIFY."
+                    )
+                elif n_mods >= 2:
+                    editable_lines.append(
+                        f"    Note: modified {n_mods} time(s)."
+                    )
+        editable_skill_section = "\n".join(editable_lines)
     else:
         editable_skill_section = "(none yet)"
     reference_skill_section = (
@@ -306,6 +329,7 @@ Rules:
 - For DBBench SQL tasks, prioritize protocol compliance, identifier quoting, schema exploration, mutation verification, and avoiding premature "cannot answer" responses.
 - Do not propose generic "verify more", "format better", or "be careful" skills if an existing learned skill already covers that behavior.
 - Do not restate an existing skill with synonyms. If the mechanism is already covered, return [] or propose a narrow MODIFY with a clear missing trigger or action rule.
+- Before proposing ADD, check whether any existing learned skill already targets the same failure mechanism (same trigger, same corrective action). If one does, MODIFY it instead of adding a duplicate.
 - Do not encode benchmark-specific answers, row values, or hidden facts. Generalize the mechanism without leaking task content.
 - Each proposal must be justified by at least one visible trigger in the trace, such as:
   - a specific SQL error
@@ -319,6 +343,11 @@ Rules:
   3. Why would that flip at least one failing sample in this batch?
   4. Is this already covered by an existing learned skill?
 - Skills should prefer realistic example identifiers from the trace pattern over placeholders like `table_name` and `column1`, but must remain mechanism-level and reusable.
+- Skill writing style:
+  - All section headers must use `##` markdown (h2). Never use bold text like `**Section Name**` as a header.
+  - Write from the agent's first-person perspective: "You must", "Before answering", "If you see X, do Y". Never describe a post-processing hook, monitoring system, or interceptor — the agent has no external middleware.
+  - The `description` field in the JSON output must be a single line under 120 characters. All skill content belongs in `content`.
+  - Never include a version number in the skill body heading or title (e.g. avoid `# skill_name (v2)`); version tracking is handled by the frontmatter.
 - If there is not enough evidence for a good edit, return [].
 """.strip()
 

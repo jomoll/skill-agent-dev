@@ -35,3 +35,13 @@ m2w-std:
     data:
       test_split_files:
         test_domain: /root/work/data/data_std/*.json
+
+mind2web-skill:
+  parameters:
+    name: "mind2web-skill"
+    concurrency: 5
+    range_min: 0
+    range_max: 100
+    data:
+      test_split_files:
+        test_domain: /root/work/data/data_dev/*.json

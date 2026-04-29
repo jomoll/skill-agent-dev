@@ -108,6 +108,12 @@ class SkillRepository:
         if not path.exists():
             raise FileNotFoundError(f"Cannot modify non-existent learned skill: {name}")
         existing = _parse_skill_file(path)
+
+        # Archive the current version before overwriting so history is queryable
+        history_dir = self.learned_dir / ".history"
+        history_dir.mkdir(exist_ok=True)
+        shutil.copy2(path, history_dir / f"{name}_v{existing.get('version', 0)}.md")
+
         # Attach parent_version so the history chain is traceable
         prov = dict(provenance or {})
         prov["parent_version"] = existing.get("version", 0)
@@ -120,6 +126,19 @@ class SkillRepository:
             version=existing["version"] + 1,
             provenance=prov,
         )
+
+    def get_history(self, name: str) -> List[Dict]:
+        """Return archived previous versions of a skill, oldest first."""
+        history_dir = self.learned_dir / ".history"
+        if not history_dir.exists():
+            return []
+        versions = []
+        for path in sorted(history_dir.glob(f"{name}_v*.md")):
+            try:
+                versions.append(_parse_skill_file(path))
+            except Exception:
+                pass
+        return versions
 
     def delete(self, name: str) -> None:
         path = self.learned_dir / f"{name}.md"
