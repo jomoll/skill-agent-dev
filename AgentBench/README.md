@@ -180,7 +180,15 @@ Then in a separate terminal run the skill-learning cycle:
 python -m src.skill_cycle --config configs/skill_cycle_alfworld.yaml --run-name run_001 --force
 ```
 
-The ALFWorld skill-cycle uses a stratified 60/40 split of `data/alfworld/standard.json` (30 dev + 20 val samples covering all 6 task types). Learned skills are written to `skills/alfworld/base/`.
+The ALFWorld skill-cycle uses a stratified 60/40 split of `data/alfworld/standard.json` (30 dev + 20 val samples covering all 6 task types).
+
+### Skill base directories
+
+Each benchmark has its own skill base directory (`skills/<benchmark>/base/`) that is read-only during a run. The skill cycle writes learned skills to `<run_dir>/skills/learned/` instead — the base directory is never modified by training.
+
+All base directories ship with only a single `skeleton.md` file, which is a read-only template that defines the required structure for learned skills (it is never injected into the agent). The exception is:
+
+**OS Interaction** (`skills/os/base/`) additionally contains `task_type_classifier.md`, a manually authored base skill that fires on every OS task. OS tasks are uniquely ambiguous between two fundamentally different task types — *execute and report* (run commands, return the observed value) and *write a command/script* (output the command text as the answer). This ambiguity cannot be resolved by the skill-learning loop because it requires semantic task-level classification rather than a behavioural correction. Adding it as a permanent base skill ensures the agent classifies the task type before taking its first action on every episode. All other benchmarks are run with their base directories unchanged (skeleton only).
 
 ### Skill-cycle (Mind2Web) quick start
 

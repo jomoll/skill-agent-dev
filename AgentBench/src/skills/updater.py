@@ -348,6 +348,7 @@ Rules:
   - Write from the agent's first-person perspective: "You must", "Before answering", "If you see X, do Y". Never describe a post-processing hook, monitoring system, or interceptor — the agent has no external middleware.
   - The `description` field in the JSON output must be a single line under 120 characters. All skill content belongs in `content`.
   - Never include a version number in the skill body heading or title (e.g. avoid `# skill_name (v2)`); version tracking is handled by the frontmatter.
+- NEVER propose a metacognitive or behavioral-monitoring skill. A metacognitive skill is any skill whose primary instruction is to "verify before finishing", "check whether the task is complete", "avoid looping", "ensure you have done X", "stop when done", "suppress preamble", or any form of self-monitoring. The agent already knows these rules; they cannot override generative behavior through text injection and only add noise. If the observed failure is looping, over-analysis, premature termination, or repetitive output, return [] rather than proposing a behavioral skill. Valid skills must prescribe a SPECIFIC COMMAND, QUERY PATTERN, PARSING STEP, or ENVIRONMENT-SPECIFIC MECHANIC that is demonstrably absent from the failing trace.
 - If there is not enough evidence for a good edit, return [].
 """.strip()
 
