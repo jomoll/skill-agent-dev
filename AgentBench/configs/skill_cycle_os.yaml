@@ -1,21 +1,14 @@
 output_dir: "outputs/skill_cycle_os"
 
-# Agent using local vLLM endpoint (LiteLLM proxy, OpenAI-compatible)
+# Agent using Vertex AI Gemini
 agent:
-  module: src.client.agents.HTTPAgent
+  module: src.client.agents.VertexAgent
   parameters:
-    url: "http://10.32.16.43:4000/chat/completions"
-    headers:
-      Authorization: "Bearer sk--jYBY-YIx5jNQqR0LPgqdQ"
-      Content-Type: "application/json"
-    body:
-      model: "gpt-oss-120b"
-      temperature: 0.2
-      max_tokens: 8192
-    prompter:
-      name: role_content_dict
-      args:
-        agent_role: "assistant"   # OpenAI expects "assistant", not "agent"
+    project_id: "gen-lang-client-0167970622"
+    location: "us-central1"
+    model: "gemini-3.1-pro-preview"
+    temperature: 0.2
+    max_output_tokens: 32768
 
 
 # Task worker (must be running before starting this script)

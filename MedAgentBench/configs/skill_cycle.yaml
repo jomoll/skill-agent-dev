@@ -1,6 +1,6 @@
-output_dir: "outputs/skill_cycle_local"
+output_dir: "outputs/skill_cycle"
 
-# Agent using Vertex AI Gemini
+# Agent used for both task execution and skill updates
 agent:
   module: src.client.agents.VertexAgent
   parameters:
@@ -11,18 +11,16 @@ agent:
     max_output_tokens: 32768
 
 # Task worker (must be running before starting this script)
-# Start with: python -m src.start_task -a --config configs/start_task.yaml
 task:
-  name: "medagentbench-skill"
-  controller_address: "http://localhost:5050/api"
+  name: "medagentbench-std"
+  controller_address: "http://localhost:5001/api"
   fhir_api_base: "http://localhost:8080/fhir/"
 
 # Data splits produced by data/medagentbench/split_dataset.py
 data:
   full: "data/medagentbench/test_data_v2.json"
-  dev:  "data/medagentbench/split_dev.json"    # 126 samples (60% of tasks 1-5,8,9) — skill learning
-  val:  "data/medagentbench/split_val.json"    # 84 samples (40% of tasks 1-5,8,9) — monitoring
-  # test: data/medagentbench/split_test.json  # 90 samples (tasks 6,7,10 held-out — OOD tasks)
+  dev:  "data/medagentbench/split_dev.json"
+  val:  "data/medagentbench/split_val.json"
 
 # Skill library
 skills:
@@ -36,6 +34,5 @@ cycle:
   max_proposals: 1      # one change per proposal (best-of-K grouped proposal ranking selects the winner)
   max_learned_skills: 10
   grpo_k: 4             # number of candidate proposals to sample per update
-  grpo_eval_n: 25       # ~20% of dev (126 samples); larger probe for more reliable signal
-  run_baseline: true    # set to true to run a silent val eval before epoch 0
-  proposal_temperature: 0.8  # high temperature for diverse skill proposals (separate from agent temperature)
+  grpo_eval_n: 20       # probe set size for grouped proposal ranking: grpo_eval_n/2 failing + grpo_eval_n/2 passing
+  run_baseline: false   # set to true to run a silent val eval before epoch 0

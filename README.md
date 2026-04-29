@@ -182,20 +182,30 @@ python -m src.run_manual_skills --config configs/manual_skills_dbbench.yaml --sp
 
 | Benchmark | Dev | Val | Test | Split strategy |
 |---|---|---|---|---|
-| MedAgentBench | 126 | 84 | 90 | 60/40 within tasks 1–5,8,9; tasks 6/7/10 held out |
-| DBBench | 176 | 124 | 60 | 60/40 of standard.jsonl stratified by query type; dev.jsonl held out |
+| MedAgentBench | 126 | 84 | 90 | 60/40 within tasks 1–5,8,9; tasks 6/7/10 held out (OOD) |
+| DBBench | 240 | 124 | 60 | 176 real (60/40 of standard.jsonl by query type) + 64 synthetic aggregation; dev.jsonl held out |
 | OS Interaction | 79 | 56 | 35 | 60/40 of worlds 1–5,7 stratified per world; world 6 + dev.json held out |
-| LTP | 30 | 20 | 20 | 60/40 of standard.xlsx; dev.xlsx held out |
-| Card Game | 24 | 16 | — | Stratified 60/40 by (baseline, agent_position); procedurally generated |
-| ALFWorld | 30 | 20 | — | Stratified 60/40 of standard.json |
+| LTP | 30 | 20 | 20 | 60/40 of standard.xlsx; dev.xlsx held out (IDs offset by 50 to avoid collision) |
+| Card Game | 60 | 20 | 20 | 15/5/5 reps × 4 combos; procedurally generated (test_time=25) |
+| ALFWorld | 26 | 24 | 20 | Stratified 60/40 of standard.json by task type; dev.json held out |
+
+### DBBench synthetic extension
+
+The four aggregation sub-types (SUM, MIN, MAX, AVG) originally had only 4 dev samples each, which is too few for reliable skill learning. `data/dbbench/generate_synthetic.py` generates 16 additional dev-only samples per type by deriving new questions from the same tables already in `standard.jsonl`, varying the aggregated column and WHERE conditions. Answers are verified with SQLite. Synthetic samples use IDs ≥ 10000 and are stored in `synthetic_dev.json`; `split_dataset.py` appends them to `split_dev.json` automatically.
+
+### ALFWorld and MedAgentBench
+
+ALFWorld scenarios live inside the Docker image — synthetic extension requires the running container and was not attempted offline. MedAgentBench tasks 2–10 require a live FHIR server for answer verification — only task 1 carries pre-verified `sol` fields, which is insufficient for meaningful extension without the server.
 
 Regenerate splits:
 
 ```bash
+python AgentBench/data/dbbench/generate_synthetic.py   # regenerate synthetic aggregation samples (run first)
 python AgentBench/data/dbbench/split_dataset.py
 python AgentBench/data/os_interaction/split_dataset.py
 python AgentBench/data/lateralthinkingpuzzle/split_dataset.py
 python AgentBench/data/card_game/split_dataset.py
+python AgentBench/data/alfworld/split_dataset.py
 python MedAgentBench/data/medagentbench/split_dataset.py
 ```
 

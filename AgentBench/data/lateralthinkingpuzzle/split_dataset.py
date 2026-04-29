@@ -46,7 +46,10 @@ def main():
     print(f"Loaded {len(standard)} samples from standard.xlsx")
 
     # Load dev.xlsx (20 rows) — held-out test set
+    # IDs are offset by len(standard) to avoid numeric collision with dev/val IDs
     test_data = read_xlsx(data_dir / "dev.xlsx")
+    for sample in test_data:
+        sample["id"] += len(standard)
     print(f"Loaded {len(test_data)} samples from dev.xlsx (test)")
 
     # 60/40 split of standard.xlsx

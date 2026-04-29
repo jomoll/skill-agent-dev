@@ -1,21 +1,14 @@
 output_dir: "outputs/skill_cycle_ltp"
 
-# Agent using local vLLM endpoint (LiteLLM proxy, OpenAI-compatible)
+# Agent using Vertex AI Gemini
 agent:
-  module: src.client.agents.HTTPAgent
+  module: src.client.agents.VertexAgent
   parameters:
-    url: "http://10.32.16.43:4000/chat/completions"
-    headers:
-      Authorization: "Bearer sk--jYBY-YIx5jNQqR0LPgqdQ"
-      Content-Type: "application/json"
-    body:
-      model: "gpt-oss-120b"
-      temperature: 0.2
-      max_tokens: 8192
-    prompter:
-      name: role_content_dict
-      args:
-        agent_role: "assistant"   # OpenAI expects "assistant", not "agent"
+    project_id: "gen-lang-client-0167970622"
+    location: "us-central1"
+    model: "gemini-3.1-flash-lite-preview"
+    temperature: 0.2
+    max_output_tokens: 32768
 
 
 # Task worker (must be running before starting this script)
@@ -47,6 +40,6 @@ cycle:
   max_proposals: 1       # one change per proposal call; best-of-K selects the winner
   max_learned_skills: 10
   grpo_k: 4              # candidate proposals sampled per update
-  grpo_eval_n: 10        # small probe set (25-round conversations are slow)
+  grpo_eval_n: 20        # ~65% of dev; LTP tasks are slow but probe needs reliable signal
   run_baseline: true     # run a silent val eval before epoch 0
   proposal_temperature: 0.8  # high temperature for diverse skill proposals (separate from agent temperature)
