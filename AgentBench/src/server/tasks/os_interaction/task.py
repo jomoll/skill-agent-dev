@@ -451,14 +451,7 @@ Think: put your thought here.
 
 Act: answer(Your answer to the question should be put in this pair of parentheses)
 
-If the output is too long, I will truncate it. The truncated output is not complete. You have to deal with the truncating problem by yourself. Attention, your bash code should not contain any input operation. Once again, you should take only exact one of the three actions in each turn.
-
-Before issuing your first action, your Think step must classify the task into exactly one of these types:
-- Type A (execute-and-report): the task asks for a concrete value obtainable only by running commands on the live system (counts, sizes, process states, file contents, etc.). Run the relevant commands and report the result.
-- Type B (generate-artifact): the task asks you to produce a script, command, or other text artifact without executing it. Return the artifact directly in answer().
-- Type C (static-knowledge): the task can be answered from general knowledge without touching the live system. Answer directly without running any command.
-
-State the type at the start of your first Think step before doing anything else.\n\n""",
+If the output is too long, I will truncate it. The truncated output is not complete. You have to deal with the truncating problem by yourself. Attention, your bash code should not contain any input operation. Once again, you should take only exact one of the three actions in each turn.\n\n""",
             }
         )
 

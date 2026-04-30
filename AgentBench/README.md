@@ -188,6 +188,9 @@ Each benchmark has its own skill base directory (`skills/<benchmark>/base/`) tha
 
 All base directories ship with only a single `skeleton.md` file, which is a read-only template that defines the required structure for learned skills (it is never injected into the agent). The exception is:
 
+**DBBench Prompt Modifications**
+We have modified the original DBBench environment prompt (`src/server/tasks/dbbench/__init__.py`) to resolve contradictory formatting instructions. The original prompt instructed the agent to output lists for modification tasks while simultaneously stating the answer field could be "anything". This forced the skill-learning framework to waste cycles learning benchmark-specific formatting hacks rather than generalized SQL skills. The revised prompt enforces strict, deterministic formatting for all actions, maintaining the benchmark-agnostic goals of the skill agent.
+
 **OS Interaction** (`skills/os/base/`) additionally contains `task_type_classifier.md`, a manually authored base skill that fires on every OS task. OS tasks are uniquely ambiguous between two fundamentally different task types — *execute and report* (run commands, return the observed value) and *write a command/script* (output the command text as the answer). This ambiguity cannot be resolved by the skill-learning loop because it requires semantic task-level classification rather than a behavioural correction. Adding it as a permanent base skill ensures the agent classifies the task type before taking its first action on every episode. All other benchmarks are run with their base directories unchanged (skeleton only).
 
 ### Skill-cycle (Mind2Web) quick start
@@ -300,3 +303,8 @@ Avalon task is merged from [AvalonBench](https://github.com/jonathanmli/Avalon-L
   journal = {arXiv preprint arXiv: 2308.03688}
 }
 ```
+
+## Local Benchmark Modifications (skill-agent-dev)
+
+* **DBBench**: Removed the arbitrary list format requirement for Type A/B classification to allow accurate skill learning.
+* **OS Interaction**: Checked against THUDM/AgentBench upstream upstream logic. Removed customized Type A/B/C classification bloat (execute-and-report, generate-artifact, static-knowledge) left over from development experiments so that it aligns closely with the original repository. This eliminates the 'Protocol Distraction' issue that prevented pure bash learning.
