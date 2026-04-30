@@ -214,6 +214,32 @@ python -m src.skill_cycle --config configs/skill_cycle_mind2web.yaml --run-name 
 
 The Mind2Web skill-cycle uses a 60/40 split of the first 100 samples from the dev set (indices 0–59 for skill learning, 60–99 for validation). Success is measured by step success rate: the agent must select the correct DOM element **and** produce a perfect-F1 action string. Learned skills are written to `skills/mind2web/base/`.
 
+### Skill-cycle internals
+
+The skill cycle (`src/skill_cycle.py`) runs an iterative learning loop:
+
+1. **Run dev samples** in batches of `update_every`. After each batch, call `_grpo_skill_update`.
+2. **GRPO skill update**: generate `grpo_k` candidate skill proposals, probe each on `grpo_eval_n` samples (`grpo_eval_n/2` currently-failing + `grpo_eval_n/2` currently-passing), pick the proposal with the highest net score (fixes − regressions). Apply only if best net > 0.
+3. **Failure taxonomy**: before proposing, the agent classifies failing samples into named failure modes via `classify_failures`. This taxonomy is passed to `diagnose` → `propose` to give the proposer structured context. The taxonomy is accumulated across batches within the epoch and carried into the next epoch.
+4. **Validation**: run all val samples after each epoch; record val score.
+5. **Best-checkpoint management**: save `skills/learned/` → `skills/best/` whenever val improves. After training ends, restore `best/` as the final checkpoint. The best checkpoint is **not** restored before each epoch — training continues from the current state, and the best checkpoint is only applied at the very end.
+6. **NOT_AVAILABLE retry**: if the task server returns `NOT_AVAILABLE` (all worker slots full), `_run_single` retries indefinitely with up to 30 s between attempts. This is common under concurrent OS load (Docker container spin-up latency). The sample is never silently dropped as incorrect.
+
+#### Data splits
+
+Each benchmark ships with pre-computed splits produced by `data/<benchmark>/split_dataset.py`:
+
+| Benchmark | Dev (skill learning) | Val (monitoring) | Test (held-out) |
+|-----------|---------------------|-----------------|----------------|
+| OS        | 79 samples (60% of worlds 1–5, 7) | 56 samples | — |
+| DBBench   | 176 samples (60% of standard.jsonl, stratified by type) | 124 samples | 60 samples (dev.jsonl) |
+| ALFWorld  | 30 samples (6 task types × ~5) | 20 samples | 20 samples (dev.json) |
+| Mind2Web  | 60 samples (indices 0–59) | 40 samples (indices 60–99) | — |
+
+**ALFWorld split note**: samples are assigned IDs matching their position in the task's `data_files` list (JSON insertion order from `standard.json`). The split script iterates in insertion order — not alphabetical order — so IDs are consistent with what `AlfWorldTask.get_indices()` returns.
+
+**DBBench split note**: the dev set contains only real `standard.jsonl` entries. Synthetic aggregation samples (IDs ≥ 10000) were removed because they always fail with `START_FAILED` (the task server indexes by position in the dataset, and those IDs are out of bounds).
+
 ## Next Steps
 
 If you wish to launch more tasks or use other models, you can refer to the content

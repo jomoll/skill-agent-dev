@@ -30,7 +30,7 @@ def _matches_select_answer(agent_answer, ground_truth) -> bool:
 
     if len(parsed) == 1 and len(cor) == 1:
         try:
-            return float(parsed[0]) == float(cor[0])
+            return float(str(parsed[0]).replace(',', '')) == float(str(cor[0]).replace(',', ''))
         except (ValueError, TypeError):
             return str(parsed[0]).strip() == str(cor[0]).strip()
 

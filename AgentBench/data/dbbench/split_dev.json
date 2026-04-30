@@ -720,11 +720,11 @@
     "answer": "[('fa81a61f9a648475594128fa51bfa80d',)]"
   },
   {
-    "id": 97,
-    "description": "Name the avg finish for position of 70th",
+    "id": 93,
+    "description": "what is the average number of laps driven in the indianapolis 500 in tony gulotta's career?",
     "type": "aggregation-AVG",
     "answer": [
-      "36.0"
+      "153"
     ]
   },
   {
@@ -736,19 +736,19 @@
     ]
   },
   {
-    "id": 98,
-    "description": "What is the average total of player hale irwin, who had a t52 finish?",
+    "id": 97,
+    "description": "Name the avg finish for position of 70th",
     "type": "aggregation-AVG",
     "answer": [
-      "293.0"
+      "36.0"
     ]
   },
   {
-    "id": 93,
-    "description": "what is the average number of laps driven in the indianapolis 500 in tony gulotta's career?",
+    "id": 92,
+    "description": "What is the average number of laps with an accident time/retired, aprilia manufacturer and a grid of 27?",
     "type": "aggregation-AVG",
     "answer": [
-      "153"
+      "12.0"
     ]
   },
   {
@@ -760,6 +760,14 @@
     ]
   },
   {
+    "id": 89,
+    "description": "what is the last train to arrive daily?",
+    "type": "aggregation-MAX",
+    "answer": [
+      "Chhatisgarh Express"
+    ]
+  },
+  {
     "id": 90,
     "description": "for the 2008-2009 season, which venue used by the iran pro league can hold the most number of spectators?",
     "type": "aggregation-MAX",
@@ -768,19 +776,11 @@
     ]
   },
   {
-    "id": 86,
-    "description": "What is the highest amount of points for rank 95?",
+    "id": 91,
+    "description": "what is the most volume any engine will hold?",
     "type": "aggregation-MAX",
     "answer": [
-      "Đeravica"
-    ]
-  },
-  {
-    "id": 85,
-    "description": "what year was the last pylon in germany built?",
-    "type": "aggregation-MAX",
-    "answer": [
-      "1970"
+      "5.4L"
     ]
   },
   {
@@ -848,46 +848,6 @@
     ]
   },
   {
-    "id": 39,
-    "description": "When the population is greater than 146,445 in the county of Carroll, what is the number of households?",
-    "type": "comparison",
-    "answer": [
-      "none"
-    ]
-  },
-  {
-    "id": 49,
-    "description": "Which November has a Game smaller than 16, and Points larger than 22?",
-    "type": "comparison",
-    "answer": [
-      "none"
-    ]
-  },
-  {
-    "id": 35,
-    "description": "name a builder that had above 7 gt numbers.",
-    "type": "comparison",
-    "answer": [
-      "ALCO"
-    ]
-  },
-  {
-    "id": 36,
-    "description": "Which Round has a School/Club Team of indiana, and a Pick smaller than 198?",
-    "type": "comparison",
-    "answer": [
-      "none"
-    ]
-  },
-  {
-    "id": 46,
-    "description": "What is Round, when Winner is \"Ivanovic\", when Year is less than 2008, and when Tournament is \"Paris\"?",
-    "type": "comparison",
-    "answer": [
-      "QF"
-    ]
-  },
-  {
     "id": 42,
     "description": "How manywins for dunfermline athletic that has a total final appearances less than 2?",
     "type": "comparison",
@@ -904,11 +864,11 @@
     ]
   },
   {
-    "id": 44,
-    "description": "What was the home teams score at Victoria Park when attendance was more than 12,000?",
+    "id": 47,
+    "description": "What was the result at A Arena, the SL league, and a match number over 16?",
     "type": "comparison",
     "answer": [
-      "16.11 (107)"
+      "63–85"
     ]
   },
   {
@@ -920,27 +880,54 @@
     ]
   },
   {
-    "id": 48,
-    "description": "What was the score against Portland in game numbers under 20?",
+    "id": 39,
+    "description": "When the population is greater than 146,445 in the county of Carroll, what is the number of households?",
     "type": "comparison",
     "answer": [
-      "L 97–98 (OT)"
+      "none"
     ]
   },
   {
-    "id": 19,
-    "description": "Among  deaths  106 000  how many is crude rate.",
-    "type": "counting",
+    "id": 44,
+    "description": "What was the home teams score at Victoria Park when attendance was more than 12,000?",
+    "type": "comparison",
     "answer": [
-      "91.0"
+      "16.11 (107)"
     ]
   },
   {
-    "id": 21,
-    "description": "how many locomotives are currently operational?",
-    "type": "counting",
+    "id": 36,
+    "description": "Which Round has a School/Club Team of indiana, and a Pick smaller than 198?",
+    "type": "comparison",
     "answer": [
-      "3"
+      "none"
+    ]
+  },
+  {
+    "id": 45,
+    "description": "which competitions did she compete in before the 2001 world championships?",
+    "type": "comparison",
+    "answer": [
+      "World Youth Championships",
+      "World Junior Championships",
+      "European Junior Championships"
+    ]
+  },
+  {
+    "id": 43,
+    "description": "in which major competitions did yoichiro kakitani have at least 3 starts?",
+    "type": "comparison",
+    "answer": [
+      "2006 AFC U-17 Championship",
+      "2008 AFC Youth Championship qualification"
+    ]
+  },
+  {
+    "id": 35,
+    "description": "name a builder that had above 7 gt numbers.",
+    "type": "comparison",
+    "answer": [
+      "ALCO"
     ]
   },
   {
@@ -952,11 +939,35 @@
     ]
   },
   {
-    "id": 20,
-    "description": "Name the total number of represents for clary sermina delgado cid",
+    "id": 17,
+    "description": "How many schools have a website of http://www.camp.herts.sch.uk/?",
     "type": "counting",
     "answer": [
       "1.0"
+    ]
+  },
+  {
+    "id": 21,
+    "description": "how many locomotives are currently operational?",
+    "type": "counting",
+    "answer": [
+      "3"
+    ]
+  },
+  {
+    "id": 19,
+    "description": "Among  deaths  106 000  how many is crude rate.",
+    "type": "counting",
+    "answer": [
+      "91.0"
+    ]
+  },
+  {
+    "id": 31,
+    "description": "how many times did brazil score during the game on november 6th?",
+    "type": "counting",
+    "answer": [
+      "2"
     ]
   },
   {
@@ -968,11 +979,11 @@
     ]
   },
   {
-    "id": 26,
-    "description": "how many nations won no silver medals at all?",
+    "id": 30,
+    "description": "How many different counts of the Raiders first downs are there for the game number 9?",
     "type": "counting",
     "answer": [
-      "11"
+      "1.0"
     ]
   },
   {
@@ -984,59 +995,27 @@
     ]
   },
   {
-    "id": 28,
-    "description": "what is the total number of participants between norway and france?",
+    "id": 26,
+    "description": "how many nations won no silver medals at all?",
     "type": "counting",
     "answer": [
-      "7"
+      "11"
     ]
   },
   {
-    "id": 22,
-    "description": "how many games did the badgers play in october?",
+    "id": 27,
+    "description": "How many award-winning films have the opening film of encounters at the end of the world?",
     "type": "counting",
     "answer": [
-      "4"
+      "1.0"
     ]
   },
   {
-    "id": 23,
-    "description": "what is the total number of websites listed?",
-    "type": "counting",
-    "answer": [
-      "17"
-    ]
-  },
-  {
-    "id": 6,
-    "description": "How many attended tie number 19?",
+    "id": 9,
+    "description": "Which Attendance has a Round of 52, and a Home of södertälje sk?",
     "type": "other",
     "answer": [
-      "1174.0"
-    ]
-  },
-  {
-    "id": 2,
-    "description": "what was the total number of medals won by united states?",
-    "type": "other",
-    "answer": [
-      "2"
-    ]
-  },
-  {
-    "id": 4,
-    "description": "VIE is the IATA for which city?",
-    "type": "other",
-    "answer": [
-      "Vienna International Airport"
-    ]
-  },
-  {
-    "id": 13,
-    "description": "what team took first place in 2008?",
-    "type": "other",
-    "answer": [
-      "Cairns Saints"
+      "2859.0"
     ]
   },
   {
@@ -1048,11 +1027,43 @@
     ]
   },
   {
-    "id": 9,
-    "description": "Which Attendance has a Round of 52, and a Home of södertälje sk?",
+    "id": 4,
+    "description": "VIE is the IATA for which city?",
     "type": "other",
     "answer": [
-      "2859.0"
+      "Vienna International Airport"
+    ]
+  },
+  {
+    "id": 3,
+    "description": "what is the difference between southampton's score and sunderland's score?",
+    "type": "other",
+    "answer": [
+      "2 goals"
+    ]
+  },
+  {
+    "id": 5,
+    "description": "other than npsl, what league has ny mens soccer team played in?",
+    "type": "other",
+    "answer": [
+      "CSL I"
+    ]
+  },
+  {
+    "id": 7,
+    "description": "crest 3d intensive professional effects and crest whitestrips 3d professional effects both have a lasting whiteness of how many months?",
+    "type": "other",
+    "answer": [
+      "12 months"
+    ]
+  },
+  {
+    "id": 6,
+    "description": "How many attended tie number 19?",
+    "type": "other",
+    "answer": [
+      "1174.0"
     ]
   },
   {
@@ -1072,19 +1083,11 @@
     ]
   },
   {
-    "id": 0,
-    "description": "What are the Notes when the Method is decision?",
+    "id": 15,
+    "description": "what is the total agricultural value in 2008/09?",
     "type": "other",
     "answer": [
-      "Women +60kg Bronze"
-    ]
-  },
-  {
-    "id": 12,
-    "description": "list the only coach that won promotion to the first tier.",
-    "type": "other",
-    "answer": [
-      "Ole Mørk"
+      "3,729.7"
     ]
   },
   {
@@ -1167,389 +1170,5 @@
     "answer": [
       "China"
     ]
-  },
-  {
-    "description": "Give me the total Week when Overall is Mike Poulin.",
-    "type": "aggregation-SUM",
-    "answer": "6.0",
-    "id": 10000
-  },
-  {
-    "description": "What is the sum of Bronze for entries where Nation is China?",
-    "type": "aggregation-SUM",
-    "answer": "52.0",
-    "id": 10001
-  },
-  {
-    "description": "What is the total Foreign nationals where City district (Stadtteil) is Nordend-West?",
-    "type": "aggregation-SUM",
-    "answer": "5.2",
-    "id": 10002
-  },
-  {
-    "description": "Give me the total Week when Transition is Bobby McBride.",
-    "type": "aggregation-SUM",
-    "answer": "2.0",
-    "id": 10003
-  },
-  {
-    "description": "Give me the total Population when City district (Stadtteil) is Innenstadt.",
-    "type": "aggregation-SUM",
-    "answer": "6.6",
-    "id": 10004
-  },
-  {
-    "description": "What is the sum of Foreign nationals for entries where City district (Stadtteil) is Westend-Süd?",
-    "type": "aggregation-SUM",
-    "answer": "3.4",
-    "id": 10005
-  },
-  {
-    "description": "What is the total Rank where Nation is France?",
-    "type": "aggregation-SUM",
-    "answer": "12.0",
-    "id": 10006
-  },
-  {
-    "description": "What is the sum of Total for entries where Nation is China?",
-    "type": "aggregation-SUM",
-    "answer": "187.0",
-    "id": 10007
-  },
-  {
-    "description": "What is the sum of Foreign nationals for entries where Foreign nationals in % is 24,7%?",
-    "type": "aggregation-SUM",
-    "answer": "10.7",
-    "id": 10008
-  },
-  {
-    "description": "What is the sum of Total for entries where Nation is Brazil?",
-    "type": "aggregation-SUM",
-    "answer": "114.0",
-    "id": 10009
-  },
-  {
-    "description": "What is the total Population where Foreign nationals in % is 32,3%?",
-    "type": "aggregation-SUM",
-    "answer": "3.5",
-    "id": 10010
-  },
-  {
-    "description": "What is the sum of Gold for entries where Nation is North Korea?",
-    "type": "aggregation-SUM",
-    "answer": "7.0",
-    "id": 10011
-  },
-  {
-    "description": "What is the total Population where Foreign nationals in % is 23,0%?",
-    "type": "aggregation-SUM",
-    "answer": "36.2",
-    "id": 10012
-  },
-  {
-    "description": "What is the total Foreign nationals where Foreign nationals in % is 38,5%?",
-    "type": "aggregation-SUM",
-    "answer": "2.5",
-    "id": 10013
-  },
-  {
-    "description": "Give me the total Foreign nationals when Area in km² is 0,51 km².",
-    "type": "aggregation-SUM",
-    "answer": "1.1",
-    "id": 10014
-  },
-  {
-    "description": "What is the total Gold where Nation is China?",
-    "type": "aggregation-SUM",
-    "answer": "75.0",
-    "id": 10015
-  },
-  {
-    "description": "What is the minimum Laps?",
-    "type": "aggregation-MIN",
-    "answer": "1.0",
-    "id": 10016
-  },
-  {
-    "description": "What is the minimum Crowd where Away team score is 11.15 (81)?",
-    "type": "aggregation-MIN",
-    "answer": "4.0",
-    "id": 10017
-  },
-  {
-    "description": "What is the smallest Crowd when Home team score is 18.12 (120)?",
-    "type": "aggregation-MIN",
-    "answer": "45.0",
-    "id": 10018
-  },
-  {
-    "description": "What is the minimum Floors where Years as tallest is 1973–present?",
-    "type": "aggregation-MIN",
-    "answer": "55.0",
-    "id": 10019
-  },
-  {
-    "description": "What is the lowest Release for entries where Artist is Chikuzen Sato with Rimi Natsukawa?",
-    "type": "aggregation-MIN",
-    "answer": "2005.0",
-    "id": 10020
-  },
-  {
-    "description": "What is the minimum Finish where Retired is Running?",
-    "type": "aggregation-MIN",
-    "answer": "7.0",
-    "id": 10021
-  },
-  {
-    "description": "What is the smallest Finish when Retired is Crash T3?",
-    "type": "aggregation-MIN",
-    "answer": "26.0",
-    "id": 10022
-  },
-  {
-    "description": "What is the minimum Floors where Name is IDS Tower?",
-    "type": "aggregation-MIN",
-    "answer": "55.0",
-    "id": 10023
-  },
-  {
-    "description": "What is the minimum Crowd where Home team score is 10.12 (72)?",
-    "type": "aggregation-MIN",
-    "answer": "12.0",
-    "id": 10024
-  },
-  {
-    "description": "What is the smallest Floors when Street address is Central Avenue Southeast and Main Street Southeast?",
-    "type": "aggregation-MIN",
-    "answer": "8.0",
-    "id": 10025
-  },
-  {
-    "description": "What is the smallest Crowd when Home team is South Melbourne?",
-    "type": "aggregation-MIN",
-    "answer": "4.0",
-    "id": 10026
-  },
-  {
-    "description": "What is the smallest Year when Retired is Running?",
-    "type": "aggregation-MIN",
-    "answer": "1956.0",
-    "id": 10027
-  },
-  {
-    "description": "What is the minimum Rank where Retired is Running?",
-    "type": "aggregation-MIN",
-    "answer": "8.0",
-    "id": 10028
-  },
-  {
-    "description": "What is the lowest Laps for entries where Retired is Engine?",
-    "type": "aggregation-MIN",
-    "answer": "12.0",
-    "id": 10029
-  },
-  {
-    "description": "What is the lowest Floors for entries where Street address is 308 2nd Avenue South?",
-    "type": "aggregation-MIN",
-    "answer": "12.0",
-    "id": 10030
-  },
-  {
-    "description": "What is the lowest Year for entries where Retired is Piston?",
-    "type": "aggregation-MIN",
-    "answer": "1964.0",
-    "id": 10031
-  },
-  {
-    "description": "What is the maximum Capacity where City is Shiraz?",
-    "type": "aggregation-MAX",
-    "answer": "20.0",
-    "id": 10032
-  },
-  {
-    "description": "What is the highest Year built for entries where Town is Singapore?",
-    "type": "aggregation-MAX",
-    "answer": "1974.0",
-    "id": 10033
-  },
-  {
-    "description": "What is the highest Sr. No. for entries where Name of the Train is Indore-Yashwantpur Exp?",
-    "type": "aggregation-MAX",
-    "answer": "5.0",
-    "id": 10034
-  },
-  {
-    "description": "What is the largest Whole Weeks when Artist(s) is Taylor Swift?",
-    "type": "aggregation-MAX",
-    "answer": "23.0",
-    "id": 10035
-  },
-  {
-    "description": "What is the highest Sr. No. for entries where Day is M?",
-    "type": "aggregation-MAX",
-    "answer": "31.0",
-    "id": 10036
-  },
-  {
-    "description": "What is the maximum Train No. where Departure is 01:25?",
-    "type": "aggregation-MAX",
-    "answer": "18238.0",
-    "id": 10037
-  },
-  {
-    "description": "What is the largest Train No. when Arrival is 01:23?",
-    "type": "aggregation-MAX",
-    "answer": "18238.0",
-    "id": 10038
-  },
-  {
-    "description": "What is the largest Capacity when City is Anzali?",
-    "type": "aggregation-MAX",
-    "answer": "8.0",
-    "id": 10039
-  },
-  {
-    "description": "What is the maximum Sr. No. where Departure is 01:25?",
-    "type": "aggregation-MAX",
-    "answer": "1.0",
-    "id": 10040
-  },
-  {
-    "description": "What is the maximum Whole Weeks where Issue Years is 2011 — 2012?",
-    "type": "aggregation-MAX",
-    "answer": "11.0",
-    "id": 10041
-  },
-  {
-    "description": "What is the largest Capacity when City is Tehran?",
-    "type": "aggregation-MAX",
-    "answer": "90.0",
-    "id": 10042
-  },
-  {
-    "description": "What is the highest Year built for entries where Name is Singapore cable car?",
-    "type": "aggregation-MAX",
-    "answer": "1972.0",
-    "id": 10043
-  },
-  {
-    "description": "What is the highest Year built for entries where Height is 113.6 m?",
-    "type": "aggregation-MAX",
-    "answer": "1966.0",
-    "id": 10044
-  },
-  {
-    "description": "What is the largest Year built when Name is Nizhny Novgorod Volga Aerial Tramway, Tower 4 & 5?",
-    "type": "aggregation-MAX",
-    "answer": "2012.0",
-    "id": 10045
-  },
-  {
-    "description": "What is the largest Number One(s) when Song(s) — Weeks is \" Another World \" — 1?",
-    "type": "aggregation-MAX",
-    "answer": "3.0",
-    "id": 10046
-  },
-  {
-    "description": "What is the largest Year built overall?",
-    "type": "aggregation-MAX",
-    "answer": "2012.0",
-    "id": 10047
-  },
-  {
-    "description": "What is the average Starts where Winnings is $7,210?",
-    "type": "aggregation-AVG",
-    "answer": "3.0",
-    "id": 10048
-  },
-  {
-    "description": "What is the mean Avg. Start when Winnings is $8,500?",
-    "type": "aggregation-AVG",
-    "answer": "39.0",
-    "id": 10049
-  },
-  {
-    "description": "What is the mean Year when Team(s) is #70 Ultra Motorsports?",
-    "type": "aggregation-AVG",
-    "answer": "2005.0",
-    "id": 10050
-  },
-  {
-    "description": "What is the average First Elected where Counties Represented is Baltimore County?",
-    "type": "aggregation-AVG",
-    "answer": "1999.6",
-    "id": 10051
-  },
-  {
-    "description": "What is the average Grid for entries where Rider is Arnaud Vincent?",
-    "type": "aggregation-AVG",
-    "answer": "2.0",
-    "id": 10052
-  },
-  {
-    "description": "What is the mean Year when Team(s) is #33 Daytona Speed Inc.?",
-    "type": "aggregation-AVG",
-    "answer": "1995.0",
-    "id": 10053
-  },
-  {
-    "description": "What is the average Year for entries where Entrant is Novi Racing?",
-    "type": "aggregation-AVG",
-    "answer": "1957.0",
-    "id": 10054
-  },
-  {
-    "description": "What is the average Laps?",
-    "type": "aggregation-AVG",
-    "answer": "14.1",
-    "id": 10055
-  },
-  {
-    "description": "What is the mean Avg. Finish overall?",
-    "type": "aggregation-AVG",
-    "answer": "24.4",
-    "id": 10056
-  },
-  {
-    "description": "What is the average Points where Chassis is Watson Indy Roadster?",
-    "type": "aggregation-AVG",
-    "answer": "1.0",
-    "id": 10057
-  },
-  {
-    "description": "What is the average Avg. Start where Winnings is $7,210?",
-    "type": "aggregation-AVG",
-    "answer": "4.7",
-    "id": 10058
-  },
-  {
-    "description": "What is the mean Avg. Start overall?",
-    "type": "aggregation-AVG",
-    "answer": "19.9",
-    "id": 10059
-  },
-  {
-    "description": "What is the average Year where Position is 123rd?",
-    "type": "aggregation-AVG",
-    "answer": "1999.0",
-    "id": 10060
-  },
-  {
-    "description": "What is the average Avg. Finish for entries where Team(s) is #0 JD Motorsports?",
-    "type": "aggregation-AVG",
-    "answer": "40.0",
-    "id": 10061
-  },
-  {
-    "description": "What is the mean Laps when Manufacturer is Aprilia?",
-    "type": "aggregation-AVG",
-    "answer": "13.0",
-    "id": 10062
-  },
-  {
-    "description": "What is the average Points where Engine is Offenhauser L4?",
-    "type": "aggregation-AVG",
-    "answer": "1.3",
-    "id": 10063
   }
 ]

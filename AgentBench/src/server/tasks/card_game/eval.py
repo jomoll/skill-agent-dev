@@ -22,8 +22,9 @@ def eval(sample: dict, task_output: TaskOutput) -> bool:
         return False
     try:
         meta = task_output.result.get("meta", {})
-        for val in meta.values():
-            return bool(val.get("win_round", 0))
-        return False
+        if not meta:
+            return False
+        val = next(iter(meta.values()))
+        return bool(val.get("win_round", 0))
     except (AttributeError, TypeError):
         return False

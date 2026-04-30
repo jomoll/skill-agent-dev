@@ -435,9 +435,6 @@ class SkillCycleRunner:
             print(f"\n{'='*60}")
             print(f"  EPOCH {epoch}")
             print(f"{'='*60}")
-            # Restore the best known skill set before each epoch so degraded
-            # skill combinations from a bad epoch never compound into the next.
-            self._restore_best_checkpoint()
             prev_taxonomy, val_score = self._run_epoch(epoch, prev_taxonomy=prev_taxonomy)
             self._maybe_update_best_checkpoint(val_score, epoch)
 
@@ -770,7 +767,7 @@ class SkillCycleRunner:
 
         if not unique_candidates:
             print("  [ProposalRanking] no valid proposals, skipping update")
-            return [], [], all_raw_proposals, {}
+            return [], [], all_raw_proposals, new_labels
 
         grpo_log = []
         best_adjusted = 0
@@ -819,7 +816,7 @@ class SkillCycleRunner:
 
         if best_candidate is None:
             print("  [ProposalRanking] no proposal improved adjusted score — applying nothing")
-            return [], grpo_log, all_raw_proposals, {}
+            return [], grpo_log, all_raw_proposals, new_labels
 
         print(f"  [ProposalRanking] winner: {best_candidate['action']}::{best_candidate['name']} "
               f"adjusted={best_adjusted:+d} (fixes={best_stats[0]}, "
@@ -1200,19 +1197,20 @@ class SkillCycleRunner:
 
         return entries
 
-    def _run_single(self, sample: Dict, max_retries: int = 3):
+    def _run_single(self, sample: Dict):
         task_index = self._id_to_index[sample["id"]]
-        for attempt in range(max_retries):
+        from src.client.task import TaskError
+        attempt = 0
+        while True:
             result: TaskClientOutput = self.task_client.run_sample(
                 task_index, self.skill_aware_agent
             )
-            from src.client.task import TaskError
-            if result.error == TaskError.NOT_AVAILABLE.value:
-                wait = 5 * (attempt + 1)
-                print(f"[SkillCycle] {sample['id']} not available, retry in {wait}s")
-                time.sleep(wait)
-                continue
-            break
+            if result.error != TaskError.NOT_AVAILABLE.value:
+                break
+            wait = min(5 * (attempt + 1), 30)
+            print(f"[SkillCycle] {sample['id']} not available, retry in {wait}s")
+            time.sleep(wait)
+            attempt += 1
         is_correct = _score_result(sample, result, self._eval_fn)
         return result, is_correct
 

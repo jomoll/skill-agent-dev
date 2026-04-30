@@ -480,19 +480,11 @@
     "answer": "[('813ca44e6cadbb77bccb38fc385bca8a',)]"
   },
   {
-    "id": 92,
-    "description": "What is the average number of laps with an accident time/retired, aprilia manufacturer and a grid of 27?",
+    "id": 98,
+    "description": "What is the average total of player hale irwin, who had a t52 finish?",
     "type": "aggregation-AVG",
     "answer": [
-      "12.0"
-    ]
-  },
-  {
-    "id": 95,
-    "description": "What is the average year that the Belanger Motors had an Offenhauser l4 engine?",
-    "type": "aggregation-AVG",
-    "answer": [
-      "1956.0"
+      "293.0"
     ]
   },
   {
@@ -504,19 +496,11 @@
     ]
   },
   {
-    "id": 99,
-    "description": "was the daily mean for july higher or lower than the daily mean for the year?",
+    "id": 95,
+    "description": "What is the average year that the Belanger Motors had an Offenhauser l4 engine?",
     "type": "aggregation-AVG",
     "answer": [
-      "higher"
-    ]
-  },
-  {
-    "id": 91,
-    "description": "what is the most volume any engine will hold?",
-    "type": "aggregation-MAX",
-    "answer": [
-      "5.4L"
+      "1956.0"
     ]
   },
   {
@@ -536,11 +520,19 @@
     ]
   },
   {
-    "id": 89,
-    "description": "what is the last train to arrive daily?",
+    "id": 86,
+    "description": "What is the highest amount of points for rank 95?",
     "type": "aggregation-MAX",
     "answer": [
-      "Chhatisgarh Express"
+      "Đeravica"
+    ]
+  },
+  {
+    "id": 85,
+    "description": "what year was the last pylon in germany built?",
+    "type": "aggregation-MAX",
+    "answer": [
+      "1970"
     ]
   },
   {
@@ -608,11 +600,19 @@
     ]
   },
   {
-    "id": 37,
-    "description": "what is the name of the episode whose director is Michael Pressman and the number of that episode in that season is less than 10.0? ",
+    "id": 48,
+    "description": "What was the score against Portland in game numbers under 20?",
     "type": "comparison",
     "answer": [
-      "\"House of Cards\""
+      "L 97–98 (OT)"
+    ]
+  },
+  {
+    "id": 99,
+    "description": "was the daily mean for july higher or lower than the daily mean for the year?",
+    "type": "comparison",
+    "answer": [
+      "higher"
     ]
   },
   {
@@ -624,30 +624,27 @@
     ]
   },
   {
-    "id": 47,
-    "description": "What was the result at A Arena, the SL league, and a match number over 16?",
+    "id": 46,
+    "description": "What is Round, when Winner is \"Ivanovic\", when Year is less than 2008, and when Tournament is \"Paris\"?",
     "type": "comparison",
     "answer": [
-      "63–85"
+      "QF"
     ]
   },
   {
-    "id": 43,
-    "description": "in which major competitions did yoichiro kakitani have at least 3 starts?",
+    "id": 37,
+    "description": "what is the name of the episode whose director is Michael Pressman and the number of that episode in that season is less than 10.0? ",
     "type": "comparison",
     "answer": [
-      "2006 AFC U-17 Championship",
-      "2008 AFC Youth Championship qualification"
+      "House of Cards"
     ]
   },
   {
-    "id": 45,
-    "description": "which competitions did she compete in before the 2001 world championships?",
+    "id": 49,
+    "description": "Which November has a Game smaller than 16, and Points larger than 22?",
     "type": "comparison",
     "answer": [
-      "World Youth Championships",
-      "World Junior Championships",
-      "European Junior Championships"
+      "none"
     ]
   },
   {
@@ -667,11 +664,11 @@
     ]
   },
   {
-    "id": 17,
-    "description": "How many schools have a website of http://www.camp.herts.sch.uk/?",
+    "id": 33,
+    "description": "how many surfaces are grass?",
     "type": "counting",
     "answer": [
-      "1.0"
+      "2"
     ]
   },
   {
@@ -683,27 +680,27 @@
     ]
   },
   {
-    "id": 30,
-    "description": "How many different counts of the Raiders first downs are there for the game number 9?",
+    "id": 22,
+    "description": "how many games did the badgers play in october?",
     "type": "counting",
     "answer": [
-      "1.0"
+      "4"
     ]
   },
   {
-    "id": 33,
-    "description": "how many surfaces are grass?",
+    "id": 28,
+    "description": "what is the total number of participants between norway and france?",
     "type": "counting",
     "answer": [
-      "2"
+      "7"
     ]
   },
   {
-    "id": 27,
-    "description": "How many award-winning films have the opening film of encounters at the end of the world?",
+    "id": 23,
+    "description": "what is the total number of websites listed?",
     "type": "counting",
     "answer": [
-      "1.0"
+      "17"
     ]
   },
   {
@@ -715,27 +712,19 @@
     ]
   },
   {
-    "id": 31,
-    "description": "how many times did brazil score during the game on november 6th?",
+    "id": 20,
+    "description": "Name the total number of represents for clary sermina delgado cid",
     "type": "counting",
     "answer": [
-      "2"
+      "1.0"
     ]
   },
   {
-    "id": 15,
-    "description": "what is the total agricultural value in 2008/09?",
+    "id": 0,
+    "description": "What are the Notes when the Method is decision?",
     "type": "other",
     "answer": [
-      "3,729.7"
-    ]
-  },
-  {
-    "id": 14,
-    "description": "did dallas or ottawa win the december 9, 1993 game?",
-    "type": "other",
-    "answer": [
-      "Dallas"
+      "Women +60kg Bronze"
     ]
   },
   {
@@ -747,22 +736,6 @@
     ]
   },
   {
-    "id": 3,
-    "description": "what is the difference between southampton's score and sunderland's score?",
-    "type": "other",
-    "answer": [
-      "2 goals"
-    ]
-  },
-  {
-    "id": 7,
-    "description": "crest 3d intensive professional effects and crest whitestrips 3d professional effects both have a lasting whiteness of how many months?",
-    "type": "other",
-    "answer": [
-      "12 months"
-    ]
-  },
-  {
     "id": 8,
     "description": "what was the number of apps for spartak nizhy novgorod?",
     "type": "other",
@@ -771,11 +744,35 @@
     ]
   },
   {
-    "id": 5,
-    "description": "other than npsl, what league has ny mens soccer team played in?",
+    "id": 13,
+    "description": "what team took first place in 2008?",
     "type": "other",
     "answer": [
-      "CSL I"
+      "Cairns Saints"
+    ]
+  },
+  {
+    "id": 12,
+    "description": "list the only coach that won promotion to the first tier.",
+    "type": "other",
+    "answer": [
+      "Ole Mørk"
+    ]
+  },
+  {
+    "id": 14,
+    "description": "did dallas or ottawa win the december 9, 1993 game?",
+    "type": "other",
+    "answer": [
+      "Dallas"
+    ]
+  },
+  {
+    "id": 2,
+    "description": "what was the total number of medals won by united states?",
+    "type": "other",
+    "answer": [
+      "2"
     ]
   },
   {
