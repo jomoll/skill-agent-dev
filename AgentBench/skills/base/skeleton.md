@@ -68,20 +68,30 @@ Bullet list of 2–5 specific behaviors the agent should avoid.
 - Good: "Do not use double quotes for MySQL identifiers when backticks are required"
 - Bad: "Do not make errors"
 
-## Example Pattern
+## Example Trajectory
 
-Provide at least one concrete wrong/correct pair that illustrates the rule.
-Use realistic commands, SQL, or answer formats.
+Provide one wrong trajectory and one correct trajectory showing 2–3 turns each.
+Use a realistic task instruction and realistic actions/observations.
+The wrong trajectory must show the exact failure this skill prevents.
+The correct trajectory must show the exact behaviour this skill produces.
 
-WRONG:
-```sql
-UPDATE `Airport Traffic Data` SET Rank = 19 WHERE Airport = 'Montreal-Pierre Elliott Trudeau International Airport';
-```
+**WRONG trajectory:**
+Task: "[task instruction]"
+Turn 1 — Think: [agent reasoning that leads to the failure]
+          Act: [wrong action]
+Obs: [observation]
+Turn 2 — Think: [reasoning showing the failure taking hold]
+          Act: [wrong answer or wrong follow-up]
+→ FAIL
 
-CORRECT:
-```sql
-UPDATE `Airport Traffic Data` SET `Rank` = 19 WHERE Airport = 'Montreal-Pierre Elliott Trudeau International Airport';
-```
+**CORRECT trajectory:**
+Task: "[same task instruction]"
+Turn 1 — Think: [agent reasoning that applies this skill]
+          Act: [correct first action]
+Obs: [observation]
+Turn 2 — Think: [agent reasoning leading to correct conclusion]
+          Act: [correct answer or correct follow-up]
+→ PASS
 
 ## Notes
 

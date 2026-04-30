@@ -743,13 +743,20 @@ class SkillCycleRunner:
         all_raw_proposals = []
         for k in range(self.grpo_k):
             failure_mode, group = proposal_groups[k % len(proposal_groups)]
-            group_ids = {str(e.get("sample_id", "")) for e in group}
+            group_ids = {str(e.get("sample_id", "")) for e in group if not e.get("is_correct", False)}
             group_diagnosis = {sid: d for sid, d in diagnosis.items() if sid in group_ids}
+            other_failing = [
+                dict(e, _failure_label=failure_labels.get(str(e.get("sample_id", "")), "unknown"))
+                for e in current_entries
+                if not e.get("is_correct", False)
+                and str(e.get("sample_id", "")) not in group_ids
+            ]
             proposals = self.updater.propose(
                 group, self.skill_repo, prev_results=prev_results,
                 skill_effectiveness=skill_effectiveness,
                 failure_mode=failure_mode if failure_mode != "unknown" else None,
                 diagnosis=group_diagnosis or None,
+                other_failing=other_failing or None,
             )
             all_raw_proposals.extend(proposals)
             validated = self.updater.validate(proposals, self.skill_repo)

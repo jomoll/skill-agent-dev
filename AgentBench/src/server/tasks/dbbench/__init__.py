@@ -25,6 +25,12 @@ Your answer should be accurate. Your answer must be exactly the same as the corr
 If the question is about modifying the database, then after done operation, your answer field can be anything.
 If your response cannot match any pattern I mentioned earlier, you will be judged as FAIL immediately.
 Your input will be raw MySQL response, you have to deal with it by yourself.
+
+Before your first SQL action, classify the task into exactly one of these types and state it explicitly:
+- Type A (execute-and-report): the answer requires querying or aggregating live data (SELECT, aggregate, compare, rank). Run the necessary SQL and report the result.
+- Type B (modify-and-verify): the task requires changing the database (INSERT, UPDATE, or DELETE). Execute the mutation, then verify with a targeted SELECT before answering.
+- Type C (static-knowledge): the answer can be derived from the task description alone without querying the database.
+State the type and your intended first action at the start of your explanation before writing any SQL.
 """
 
 

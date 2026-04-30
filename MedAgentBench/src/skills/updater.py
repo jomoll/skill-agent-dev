@@ -139,10 +139,8 @@ def _format_log(
             lines.append(f"Learned skills before run: {', '.join(skill_names)}")
         if actions:
             lines.append("Agent actions:")
-            for action in actions[:8]:
+            for action in actions:
                 lines.append(f"- {action}")
-            if len(actions) > 8:
-                lines.append(f"- ... ({len(actions) - 8} more)")
         if history:
             lines.append("Selected trace context:")
             for msg in history[-8:]:
@@ -215,6 +213,7 @@ def _build_prompt(
     skill_effectiveness: Optional[Dict[str, Any]] = None,
     failure_mode: Optional[str] = None,
     diagnosis: Optional[Dict[str, str]] = None,
+    other_failing: Optional[List[Dict]] = None,
 ) -> str:
     all_skills = skill_repo.load_all()
     learned_skills = [s for s in all_skills if skill_repo.exists_in_learned(s["name"])]
@@ -261,6 +260,19 @@ def _build_prompt(
     skeleton_section = skeleton["content"] if skeleton else "(not found)"
     log_section = _format_log(entries, prev_results=prev_results, diagnoses=diagnosis)
 
+    if other_failing:
+        other_lines = []
+        for e in other_failing:
+            label = e.get("_failure_label", "unknown")
+            instruction = str(e.get("instruction", "") or "")[:120].replace("\n", " ")
+            other_lines.append(f"  [{label}] {instruction}")
+        other_failing_section = (
+            "\nOther active failures in this batch (different mechanisms — "
+            "do NOT regress these):\n" + "\n".join(other_lines)
+        )
+    else:
+        other_failing_section = ""
+
     slots_free = max_learned_skills - len(learned_skills)
     if slots_free == 0:
         skill_stats = (
@@ -305,7 +317,7 @@ Editable learned skills:
 {skill_stats}
 
 --- PERFORMANCE LOG ---
-{f"Dominant failure mode in this group: {failure_mode}" + chr(10) if failure_mode else ""}{log_section}
+{f"Dominant failure mode in this group: {failure_mode}" + chr(10) if failure_mode else ""}{log_section}{other_failing_section}
 
 Return ONLY a JSON array of proposed edits:
 [
@@ -371,82 +383,152 @@ class SkillUpdater:
         if not failing:
             return {}, {}
 
-        lines = []
-        for e in failing:
-            sid = e.get("sample_id", "?")
-            instruction = str(e.get("instruction", "") or "")[:150].replace("\n", " ")
-            tags = e.get("failure_tags") or []
-            actions = e.get("agent_actions") or []
-            last = actions[-2:] if len(actions) >= 2 else actions
-            last_str = " | ".join(str(a)[:120].replace("\n", " ") for a in last)
-            lines.append(
-                f'  "{sid}": instruction="{instruction}" tags={tags} last_actions="{last_str}"'
-            )
+        # These examples show the right granularity for mechanism labels.
+        # They are NOT a closed vocabulary — generate a new specific label whenever
+        # the trace shows a distinct mechanism not already covered by prior labels.
+        vocab_examples = (
+            "  fhir_resource_wrong_field_extracted — read the correct resource but "
+            "pulled the wrong field (e.g. used effectiveDateTime instead of issued)\n"
+            "  patient_id_not_resolved_before_query — attempted a resource lookup "
+            "without first resolving the patient ID from the context\n"
+            "  answer_submitted_before_verification — returned a final answer before "
+            "confirming the FHIR response actually contained the requested value\n"
+            "  quantity_unit_mismatch — returned a numeric value without the required "
+            "unit, or in the wrong unit (e.g. mg instead of mcg)\n"
+            "  wrong_resource_type_queried — queried Observation when MedicationRequest "
+            "was needed, or vice versa\n"
+            "  date_filter_omitted — retrieved all records for a resource type instead "
+            "of filtering to the required date or date range\n"
+            "  answer_format_wrong_type — returned a scalar when a list was expected, "
+            "or vice versa"
+        )
 
         if prev_taxonomy:
             taxonomy_section = (
-                "Reference labels from the previous epoch — reuse these when they fit, "
-                "and only introduce a new label if a failure pattern is genuinely not "
-                "covered by any of them:\n"
+                "Examples of well-scoped labels (these show the right specificity — "
+                "generate your own specific labels, do not limit yourself to these):\n"
+                + vocab_examples + "\n\n"
+                "Labels used in previous epochs (reuse when the mechanism genuinely "
+                "recurs; mint a new specific label when the mechanism is distinct):\n"
                 + "\n".join(f'  "{k}": {v}' for k, v in prev_taxonomy.items())
             )
         else:
             taxonomy_section = (
-                "No existing labels — define fresh mechanistic labels for these failures."
+                "Examples of well-scoped labels (these show the right specificity — "
+                "generate your own specific labels, do not limit yourself to these):\n"
+                + vocab_examples
             )
 
-        prompt = (
-            "Classify each failing agent trace with a short mechanistic failure mode label "
-            "(3-6 words, snake_case). Focus on WHAT went wrong mechanistically.\n\n"
-            + taxonomy_section + "\n\n"
-            "Failing traces:\n" + "\n".join(lines) + "\n\n"
-            "Return ONLY a JSON object with two keys:\n"
-            '{\n'
-            '  "labels": {"sample_id": "label", ...},\n'
-            '  "new_labels": {"label": "one-line description"}\n'
-            '}\n'
-            '"new_labels" must only contain labels NOT present in the reference set above. '
-            "If all labels reuse existing ones, set \"new_labels\" to {}."
-        )
+        def _build_lines(truncate: bool) -> list:
+            result = []
+            for e in failing:
+                sid = e.get("sample_id", "?")
+                instruction = str(e.get("instruction", "") or "")[:150].replace("\n", " ")
+                tags = e.get("failure_tags") or []
+                actions = e.get("agent_actions") or []
+                if truncate:
+                    trace_str = " → ".join(str(a)[:160].replace("\n", " ") for a in actions)
+                else:
+                    trace_str = " → ".join(str(a).replace("\n", " ") for a in actions)
+                # Include evaluation outcome so the classifier can see WHY the task
+                # failed even when the action trace looks procedurally correct.
+                task_result = e.get("task_result") or {}
+                reported = str(task_result.get("reported_answer", "")).replace("\n", " ")
+                ground_truth = str(e.get("ground_truth", "")).replace("\n", " ")
+                eval_error = str(task_result.get("error", "") or "").replace("\n", " ")
+                eval_str = f'reported="{reported}" expected="{ground_truth}"'
+                if eval_error:
+                    eval_str += f' error="{eval_error}"'
+                result.append(
+                    f'  "{sid}": instruction="{instruction}" tags={tags} {eval_str} trace="{trace_str}"'
+                )
+            return result
 
-        try:
+        def _make_prompt(lines: list) -> str:
+            return (
+                "Classify each failing agent trace with a short mechanistic failure-mode "
+                "label (3-6 words, snake_case). Each label must be specific enough that a "
+                "different label implies a different skill. Classify by the exact mechanism "
+                "visible in the trace — the wrong reasoning step, the wrong action, the "
+                "wrong assumption — not by the domain or the surface error message.\n\n"
+                "IMPORTANT: Every entry below was marked is_correct=False by the evaluator. "
+                "Each one failed. If the action trace looks procedurally correct, the failure "
+                "is in the final answer value (wrong field, wrong unit, wrong resource, or "
+                "format mismatch). Use the reported= and expected= fields to identify the "
+                "specific mismatch. Never assign the label 'correct_behavior_no_failure' — "
+                "if you cannot identify the mechanism from the actions, infer it from the "
+                "answer/expected divergence.\n\n"
+                + taxonomy_section + "\n\n"
+                "Failing traces (instruction + benchmark tags + eval outcome + full action trace):\n"
+                + "\n".join(lines) + "\n\n"
+                "Return ONLY a JSON object with two keys:\n"
+                '{\n'
+                '  "labels": {"sample_id": "label", ...},\n'
+                '  "new_labels": {"label": "one-line description"}\n'
+                '}\n'
+                '"new_labels" should contain every label that does not appear in the '
+                "examples or prior-epoch labels above, with a one-line mechanism "
+                'description. Set "new_labels" to {} only if every label is an exact '
+                "reuse of a prior label."
+            )
+
+        def _run_attempt(lines: list) -> tuple:
+            prompt = _make_prompt(lines)
+            approx_chars = len(prompt)
+            print(
+                f"[SkillUpdater] classify_failures: ~{approx_chars:,} chars "
+                f"(~{approx_chars // 4:,} est. tokens) for {len(failing)} traces"
+            )
             response = self.agent.inference([{"role": "user", "content": prompt}])
             fenced = _extract_fenced_payload(response)
             raw = fenced or response
             block = _extract_balanced_json_block(raw.strip(), "{", "}")
-            if block:
-                data = json.loads(block)
-                if isinstance(data, dict):
-                    sample_to_label = {
-                        str(k): str(v) for k, v in data.get("labels", {}).items()
-                        if isinstance(v, str)
-                    }
-                    # Compute new labels from the diff — don't trust LLM self-reporting.
-                    # Any label used in sample_to_label that isn't in prev_taxonomy is new.
-                    llm_descriptions = {
-                        str(k): str(v) for k, v in data.get("new_labels", {}).items()
-                        if isinstance(v, str)
-                    }
-                    known = set(prev_taxonomy or {})
-                    new_labels = {
-                        lbl: llm_descriptions.get(lbl, lbl.replace("_", " "))
-                        for lbl in set(sample_to_label.values())
-                        if lbl not in known
-                    }
-                    unique_labels = set(sample_to_label.values())
-                    n_reused = len(unique_labels - set(new_labels))
-                    print(
-                        f"[SkillUpdater] classified {len(failing)} failing traces → "
-                        f"{len(unique_labels)} mode(s) "
-                        f"({n_reused} reused, {len(new_labels)} new): "
-                        + ", ".join(
-                            f"{lbl}({sum(1 for v in sample_to_label.values() if v == lbl)})"
-                            for lbl in sorted(unique_labels)
-                        )
-                    )
-                    return sample_to_label, new_labels
+            if not block:
+                raise ValueError("no JSON block found in classifier response")
+            data = json.loads(block)
+            if not isinstance(data, dict):
+                raise ValueError(f"classifier returned unexpected type: {type(data)}")
+            sample_to_label = {
+                str(k): str(v) for k, v in data.get("labels", {}).items()
+                if isinstance(v, str)
+            }
+            # Compute new labels from the diff — don't trust LLM self-reporting.
+            # Any label used in sample_to_label that isn't in prev_taxonomy is new.
+            llm_descriptions = {
+                str(k): str(v) for k, v in data.get("new_labels", {}).items()
+                if isinstance(v, str)
+            }
+            known = set(prev_taxonomy or {})
+            new_labels = {
+                lbl: llm_descriptions.get(lbl, lbl.replace("_", " "))
+                for lbl in set(sample_to_label.values())
+                if lbl not in known
+            }
+            unique_labels = set(sample_to_label.values())
+            n_reused = len(unique_labels - set(new_labels))
+            print(
+                f"[SkillUpdater] classified {len(failing)} failing traces → "
+                f"{len(unique_labels)} mode(s) "
+                f"({n_reused} reused, {len(new_labels)} new): "
+                + ", ".join(
+                    f"{lbl}({sum(1 for v in sample_to_label.values() if v == lbl)})"
+                    for lbl in sorted(unique_labels)
+                )
+            )
+            return sample_to_label, new_labels
+
+        try:
+            return _run_attempt(_build_lines(truncate=False))
         except Exception as e:
-            print(f"[SkillUpdater] classify_failures failed: {e}")
+            print(
+                f"[SkillUpdater] classify_failures failed ({e}), "
+                "retrying with 160-char per-action truncation"
+            )
+
+        try:
+            return _run_attempt(_build_lines(truncate=True))
+        except Exception as e:
+            print(f"[SkillUpdater] classify_failures retry also failed: {e}")
         return {}, {}
 
     def diagnose(
@@ -477,10 +559,9 @@ class SkillUpdater:
             label = (failure_labels or {}).get(str(sid), "unknown")
             instruction = str(e.get("instruction", "") or "")[:120].replace("\n", " ")
             actions = e.get("agent_actions") or []
-            last = actions[-3:] if len(actions) >= 3 else actions
-            last_str = " | ".join(str(a)[:120].replace("\n", " ") for a in last)
+            trace_str = " | ".join(str(a).replace("\n", " ") for a in actions)
             lines.append(
-                f'  "{sid}": label="{label}" task="{instruction}" last_actions="{last_str}"'
+                f'  "{sid}": label="{label}" task="{instruction}" actions="{trace_str}"'
             )
 
         prompt = (
@@ -566,6 +647,7 @@ class SkillUpdater:
         skill_effectiveness: Optional[Dict[str, Any]] = None,
         failure_mode: Optional[str] = None,
         diagnosis: Optional[Dict[str, str]] = None,
+        other_failing: Optional[List[Dict]] = None,
     ) -> List[Dict]:
         """Call the LLM and return raw (unvalidated) proposals."""
         prompt = _build_prompt(
@@ -577,6 +659,7 @@ class SkillUpdater:
             skill_effectiveness=skill_effectiveness,
             failure_mode=failure_mode,
             diagnosis=diagnosis,
+            other_failing=other_failing,
         )
         history = [{"role": "user", "content": prompt}]
         try:

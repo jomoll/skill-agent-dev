@@ -209,7 +209,7 @@ class HTTPAgent(AgentClient):
         prompter=None,
         max_retries: int = 10,
         retry_base_delay: float = 5.0,
-        retry_max_delay: float = 120.0,
+        retry_max_delay: float = 60.0,
         timeout: int = 120,
         **kwargs,
     ) -> None:

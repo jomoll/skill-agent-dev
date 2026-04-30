@@ -248,3 +248,73 @@ MedAgentBench/skills/
 ```
 
 Learned skills are written to `outputs/<run>/skills/learned/` during training and loaded fresh on every inference call.
+
+---
+
+## Framework modifications
+
+Changes from the original upstream codebase, grouped by concern.
+
+### 1. Failure taxonomy — mechanism-based classification
+**File:** `AgentBench/src/skills/updater.py` (`SkillUpdater.classify_failures`)
+
+- The trace passed to the classifier is the **full action sequence** (all turns), with each
+  action truncated to 160 characters. The original implementation passed only the last 2
+  actions; the failure mechanism is often in the middle of a trace, so the full trace is needed.
+- Instead of a closed required vocabulary, the classifier prompt injects **example labels** that
+  show the right granularity. Labels must be specific enough that two different labels imply two
+  different skills (e.g. `sql_max_on_text_column`, not `wrong_method_for_goal`). The examples
+  are illustrative only — the classifier is instructed to generate new specific labels freely
+  and only reuse prior-epoch labels when the mechanism genuinely recurs.
+
+### 2. Skill injection point — prefix on first decision, suffix on continuations
+**File:** `AgentBench/src/client/agents/skill_aware_agent.py` (`SkillAwareAgent.inference`)
+
+- **First agent decision** (no prior assistant/agent turn): skills are **prepended** to the
+  last user message so the model reads them before the task instruction, interrupting
+  reflexive first-action behaviour.
+- **Continuation turns** (prior agent turn exists): skills are **appended** after the latest
+  observation, keeping them at the recency-favoured end of context (previous behaviour).
+
+### 3. Task-type classification in system prompts
+**Files:**
+- `AgentBench/src/server/tasks/os_interaction/task.py`
+- `AgentBench/src/server/tasks/dbbench/__init__.py`
+
+A paragraph appended to each task's system prompt requires the agent to classify the task
+before its first action.  Both benchmarks use the same A/B/C scheme:
+
+| Type | OS | DBBench |
+|------|----|---------|
+| **A** execute-and-report | run commands, report result | query/aggregate live data, report result |
+| **B** generate-artifact / modify-and-verify | produce script as text without executing | mutate database, verify with SELECT |
+| **C** static-knowledge | answer from general Linux knowledge | answer from task description alone |
+
+**Exact text appended to the OS Interaction system prompt** (after the action descriptions):
+```
+Before issuing your first action, your Think step must classify the task into exactly one of these types:
+- Type A (execute-and-report): the task asks for a concrete value obtainable only by running commands on the live system (counts, sizes, process states, file contents, etc.). Run the relevant commands and report the result.
+- Type B (generate-artifact): the task asks you to produce a script, command, or other text artifact without executing it. Return the artifact directly in answer().
+- Type C (static-knowledge): the task can be answered from general knowledge without touching the live system. Answer directly without running any command.
+
+State the type at the start of your first Think step before doing anything else.
+```
+
+**Exact text appended to the DBBench system prompt** (after the existing instructions):
+```
+Before your first SQL action, classify the task into exactly one of these types and state it explicitly:
+- Type A (execute-and-report): the answer requires querying or aggregating live data (SELECT, aggregate, compare, rank). Run the necessary SQL and report the result.
+- Type B (modify-and-verify): the task requires changing the database (INSERT, UPDATE, or DELETE). Execute the mutation, then verify with a targeted SELECT before answering.
+- Type C (static-knowledge): the answer can be derived from the task description alone without querying the database.
+State the type and your intended first action at the start of your explanation before writing any SQL.
+```
+
+### 4. Skill template — Example Trajectory replaces Example Pattern
+**Files:**
+- `AgentBench/skills/base/skeleton.md`
+- `AgentBench/src/skills/updater.py` (`_build_prompt` generation rules)
+
+The `## Example Pattern` section (static wrong/correct code pair) is replaced by
+`## Example Trajectory`, requiring one wrong and one correct 2–3 turn trajectory
+(`Think → Act → Obs → Think → Act`).  The generation rules in `_build_prompt` are updated
+to require trajectory examples and prohibit static code pairs.

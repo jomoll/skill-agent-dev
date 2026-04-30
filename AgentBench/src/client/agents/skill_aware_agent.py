@@ -1,13 +1,19 @@
 """
 SkillAwareAgent — wraps any AgentClient and injects the current skill library
-into the LAST user message before each inference call.
+into the conversation history before each inference call.
 
-Skills are appended as a plain-text block after the most recent user message
-content (i.e. the most recent environment observation). Injecting at the last
-user turn — rather than the first — keeps the skill block close to the point
-where the model decides its next action. In long multi-turn trajectories (OS
-interaction, ALFWorld) the first message can be 15–20 turns back, well outside
-the model's effective attention window.
+Injection strategy depends on whether this is the first agent decision or a
+continuation turn:
+
+  First decision (no prior assistant/agent turn in history):
+      Skills are PREPENDED to the last user message so the model reads them
+      before the task instruction.  This interrupts reflexive first-action
+      behaviour that would otherwise fire before any skill context is processed.
+
+  Continuation turn (prior assistant/agent turn exists):
+      Skills are APPENDED to the last user message (after the latest environment
+      observation) so they remain at the recency-favoured end of the context,
+      close to the generation point.
 
 Each skill is introduced by its description so the model can judge applicability
 at a glance; the full content follows for when the skill is relevant.
@@ -45,20 +51,32 @@ class SkillAwareAgent(AgentClient):
         if is_dbbench:
             suffix_parts.append(self._dbbench_protocol())
 
-        suffix = "\n\n" + "\n\n".join(suffix_parts)
+        skill_block = "\n\n" + "\n\n".join(suffix_parts)
 
-        # Inject into the last user message so the skill block stays close to
-        # the model's current decision point. In multi-turn tasks the first
-        # message can be many turns back and receives little attention.
         modified = list(history)
         last_user_idx = max(
             (i for i, m in enumerate(modified) if m.get("role") == "user"),
             default=0,
         )
-        modified[last_user_idx] = {
-            "role": "user",
-            "content": modified[last_user_idx]["content"] + suffix,
-        }
+
+        # Determine injection position based on whether the agent has already
+        # taken at least one turn.  "agent" covers DBBench's acknowledgement
+        # message; "assistant" covers standard chat-format tasks.
+        is_first_decision = not any(
+            m.get("role") in ("assistant", "agent")
+            for m in modified[:last_user_idx + 1]
+        )
+
+        if is_first_decision:
+            # Prepend: skills appear before the task instruction so the model
+            # processes behavioural rules before reading the task and acting.
+            new_content = skill_block.lstrip("\n") + "\n\n" + modified[last_user_idx]["content"]
+        else:
+            # Append: skills stay at the recency-favoured end of the context,
+            # immediately before generation on continuation turns.
+            new_content = modified[last_user_idx]["content"] + skill_block
+
+        modified[last_user_idx] = {"role": "user", "content": new_content}
         return self.agent.inference(modified)
 
     @staticmethod
