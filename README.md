@@ -164,7 +164,7 @@ cd MedAgentBench && conda activate medagentbench
 python -m src.start_task -a --config configs/start_task.yaml
 
 # Terminal 3 — run skill cycle
-python -m src.skill_cycle --config configs/skill_cycle_local.yaml --run-name run_001
+python -m src.skill_cycle --config configs/skill_cycle.yaml --run-name run_001
 ```
 
 ### Evaluating with a manual skill pack
