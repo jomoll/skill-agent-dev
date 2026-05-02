@@ -3,12 +3,80 @@
 ![](./assets/cover.jpg)
 
 <p align="center">
-   <a href="https://llmbench.ai" target="_blank">🌐 Website</a> | <a href="https://twitter.com/thukeg" target="_blank">🐦 Twitter</a> | <a href="mailto:agentbench@googlegroups.com">✉️ Google Group</a> | <a href="https://arxiv.org/abs/2308.03688" target="_blank">📃 Paper </a>
+   <a href="https://docs.google.com/spreadsheets/d/e/2PACX-1vRR3Wl7wsCgHpwUw1_eUXW_fptAPLL3FkhnW_rua0O1Ji_GIVrpTjY5LaKAhwO-WeARjnY_KNw0SYNJ/pubhtml" target="_blank">🌐 Leaderboard (new)</a> | <a href="https://twitter.com/thukeg" target="_blank">🐦 Twitter</a> | <a href="mailto:agentbench@googlegroups.com">✉️ Google Group</a> | <a href="https://arxiv.org/abs/2308.03688" target="_blank">📃 Paper </a>
 </p>
 
 <p align="center">
 👋 Join our <a href="https://join.slack.com/t/agentbenchcol-huw1944/shared_invite/zt-20ixabcuv-31cFLBAkqGQxQkJqrWVEVg" target="_blank">Slack</a>  for <i>Q & A</i> or <i><b>collaboration</b> on next version of AgentBench</i>!
 </p>
+
+## 🔥[2025.10.10] Introducing **AgentBench FC (Function Calling)** based on [AgentRL](https://github.com/THUDM/AgentRL)
+
+The current repository contains the function-calling version of AgentBench, integrated with [AgentRL](https://github.com/THUDM/AgentRL), an end-to-end multitask and mutliturn LLM Agent RL framework.
+If you wish to use the older version, you can revert to [v0.1](https://github.com/THUDM/AgentBench/tree/v0.1) and [v0.2](https://github.com/THUDM/AgentBench/tree/v0.2).
+
+Comparing to the original AgentBench, this version uses a function-calling style prompt,
+and adds fully-containerized deployment support for the following tasks:
+
+- `alfworld` (AF)
+- `dbbench` (DB)
+- `knowledgegraph` (KG)
+- `os_interaction` (OS)
+- `webshop` (WS)
+
+### Quick Start
+
+We support a quick one-command setup for all the above tasks using Docker Compose.
+
+Before starting, please download or build the following Docker images required by the tasks:
+
+```shell
+# dbbench
+docker pull mysql:8
+
+# os_interaction
+docker build -t local-os/default -f ./data/os_interaction/res/dockerfiles/default data/os_interaction/res/dockerfiles
+docker build -t local-os/packages -f ./data/os_interaction/res/dockerfiles/packages data/os_interaction/res/dockerfiles
+docker build -t local-os/ubuntu -f ./data/os_interaction/res/dockerfiles/ubuntu data/os_interaction/res/dockerfiles
+```
+
+To run the KG freebase server, you will also need a copy of the data found [here](https://github.com/dki-lab/Freebase-Setup).
+Download, extract and place the data at `./virtuoso_db/virtuoso.db` (or modify `extra/docker-compose.yml` and set the mount point to your data location).
+
+Then, you can bring up the stack with:
+
+```shell
+docker compose -f extra/docker-compose.yml up
+```
+
+This command will download or build the necessary Docker images and start the following services in Docker:
+
+- AgentRL Controller
+- `alfworld` task worker (x1, increase as needed)
+- `dbbench` task worker (x1, increase as needed)
+- `knowledgegraph` task worker (x1, increase as needed)
+- `os_interaction` task worker (x1, increase as needed)
+- `webshop` task worker (x1, increase as needed)
+- freebase server (for `knowledgegraph` task)
+- Redis server (for container allocation)
+
+If your machine already has Redis (version 7+) running, you can omit the Redis service from the `docker-compose.yml`.
+
+> [!WARNING]  
+> Please note that the `webshop` environment requires ~16GB of RAM to start,
+> and the current implementation of `alfworld` leaks memory and disk space until the task worker is restarted.
+> Make sure your machine has sufficient resources before running.
+
+### Benchmarking Results
+
+We report the results of various models on the test set of AgentBench FC.
+
+![img.png](assets/fc_leaderboard.png)
+
+Please see our [Leaderboard](https://docs.google.com/spreadsheets/d/e/2PACX-1vRR3Wl7wsCgHpwUw1_eUXW_fptAPLL3FkhnW_rua0O1Ji_GIVrpTjY5LaKAhwO-WeARjnY_KNw0SYNJ/pubhtml) for full results.
+Please contact [agentbench_fc&#64;googlegroups.com](mailto:agentbench_fc@googlegroups.com) if you have any questions or would like to contribute your results.
+
+---
 
 ## 🔥[2024.08.13] Introducing [VisualAgentBench](https://github.com/THUDM/VisualAgentBench)
 
@@ -20,16 +88,9 @@ VisualAgentBench is designed for evaluating and training visual foundation agent
 
 to systematically benchmark 17 LMMs (proprietary & open LMMs). We also provide the trajectory dataset for behavior cloning training on open LMMs for you to develop your own visual foundation agents!
 
-## 📌Introducing AgentBench v0.2🎉
+---
 
-You are now browsing AgentBench v0.2. If you wish to use the older version, you can revert to [v0.1](https://github.com/THUDM/AgentBench/tree/v0.1).
-
-Based on [v0.1](https://github.com/THUDM/AgentBench/tree/v0.1), we:
-
--   Updated the framework architecture for easier use and extension
--   Adjusted some task settings
--   Added test results for more models
--   Released the full data for the Dev and Test sets
+The following is the introduction to the original AgentBench (v0.2).
 
 # AgentBench: Evaluating LLMs as Agents
 
@@ -90,6 +151,9 @@ and [Program Entrance Guide](docs/Entrance_en.md).
 
 Clone this repo and install the dependencies.
 
+> **Python version note:** AgentBench pins older scientific Python deps (e.g. `numpy~=1.23.x`).
+> Using the recommended **Python 3.9** (via conda) is the most reliable way to install dependencies.
+
 ```bash
 cd AgentBench
 conda create -n agent-bench python=3.9
@@ -139,6 +203,14 @@ python -m src.start_task -a
 This will launch five task_workers each for `dbbench-std` and `os-std` tasks and automatically connect them
 to the controller on port 5000. **After executing this command, please allow approximately 1 minute for the task setup to complete.** If the terminal shows ".... 200 OK", you can open another terminal and follow step 4.
 
+#### Lite preset (laptops / limited RAM)
+
+If you want to start with minimal concurrency (1 worker per task), use the lite preset:
+
+```bash
+python -m src.start_task -a --config configs/start_task_lite.yaml
+```
+
 ### Step 4. Start the assigner
 
 This step is to actually start the tasks.
@@ -149,96 +221,11 @@ If everything is correctly configured so far, you can now initiate the task test
 python -m src.assigner
 ```
 
-### Skill-cycle (OS) quick start
-
-The OS skill-learning config defaults to controller `5040` and worker base port `5041` to avoid conflicts with `5001`.
+If you started the task server with the lite preset, you can also run the lite evaluation preset:
 
 ```bash
-python -m src.start_task -a --config configs/start_skill_task_os.yaml
-python -m src.skill_cycle --config configs/skill_cycle_os.yaml --run-name run_001 --force
+python -m src.assigner --config configs/assignments/lite.yaml
 ```
-
-The OS skill-cycle config is set to use `http://localhost:5040/api` as the controller.
-
-### Skill-cycle (ALFWorld) quick start
-
-Pull the ALFWorld Docker image first (requires network access):
-
-```bash
-docker pull longinyu/agentbench-alfworld
-```
-
-Start the task worker on `5060+` (avoids conflicts with OS and LTP workers):
-
-```bash
-python -m src.start_task -a --config configs/start_skill_task_alfworld.yaml --controller-port 5060 --base-port 5061
-```
-
-Then in a separate terminal run the skill-learning cycle:
-
-```bash
-python -m src.skill_cycle --config configs/skill_cycle_alfworld.yaml --run-name run_001 --force
-```
-
-The ALFWorld skill-cycle uses a stratified 60/40 split of `data/alfworld/standard.json` (30 dev + 20 val samples covering all 6 task types).
-
-### Skill base directories
-
-Each benchmark has its own skill base directory (`skills/<benchmark>/base/`) that is read-only during a run. The skill cycle writes learned skills to `<run_dir>/skills/learned/` instead — the base directory is never modified by training.
-
-All base directories ship with only a single `skeleton.md` file, which is a read-only template that defines the required structure for learned skills (it is never injected into the agent). The exception is:
-
-**OS Interaction** (`skills/os/base/`) additionally contains `task_type_classifier.md`, a manually authored base skill that fires on every OS task. OS tasks are uniquely ambiguous between two fundamentally different task types — *execute and report* (run commands, return the observed value) and *write a command/script* (output the command text as the answer). This ambiguity cannot be resolved by the skill-learning loop because it requires semantic task-level classification rather than a behavioural correction. Adding it as a permanent base skill ensures the agent classifies the task type before taking its first action on every episode. All other benchmarks are run with their base directories unchanged (skeleton only).
-
-### Skill-cycle (Mind2Web) quick start
-
-Pull the Mind2Web Docker image first (requires network access):
-
-```bash
-docker pull longinyu/agentbench-mind2web
-```
-
-Start the task worker on `5070+` (avoids conflicts with OS, LTP, Card Game, DBBench, and ALFWorld workers):
-
-```bash
-python -m src.start_task -a --config configs/start_skill_task_mind2web.yaml --controller-port 5070 --base-port 5071
-```
-
-**Note:** the Mind2Web image takes ~5 minutes to initialise. Wait until the terminal shows `... 200 OK` before continuing.
-
-Then in a separate terminal run the skill-learning cycle:
-
-```bash
-python -m src.skill_cycle --config configs/skill_cycle_mind2web.yaml --run-name run_001 --force
-```
-
-The Mind2Web skill-cycle uses a 60/40 split of the first 100 samples from the dev set (indices 0–59 for skill learning, 60–99 for validation). Success is measured by step success rate: the agent must select the correct DOM element **and** produce a perfect-F1 action string. Learned skills are written to `skills/mind2web/base/`.
-
-### Skill-cycle internals
-
-The skill cycle (`src/skill_cycle.py`) runs an iterative learning loop:
-
-1. **Run dev samples** in batches of `update_every`. After each batch, call `_grpo_skill_update`.
-2. **GRPO skill update**: generate `grpo_k` candidate skill proposals, probe each on `grpo_eval_n` samples (`grpo_eval_n/2` currently-failing + `grpo_eval_n/2` currently-passing), pick the proposal with the highest net score (fixes − regressions). Apply only if best net > 0.
-3. **Failure taxonomy**: before proposing, the agent classifies failing samples into named failure modes via `classify_failures`. This taxonomy is passed to `diagnose` → `propose` to give the proposer structured context. The taxonomy is accumulated across batches within the epoch and carried into the next epoch.
-4. **Validation**: run all val samples after each epoch; record val score.
-5. **Best-checkpoint management**: save `skills/learned/` → `skills/best/` whenever val improves. After training ends, restore `best/` as the final checkpoint. The best checkpoint is **not** restored before each epoch — training continues from the current state, and the best checkpoint is only applied at the very end.
-6. **NOT_AVAILABLE retry**: if the task server returns `NOT_AVAILABLE` (all worker slots full), `_run_single` retries indefinitely with up to 30 s between attempts. This is common under concurrent OS load (Docker container spin-up latency). The sample is never silently dropped as incorrect.
-
-#### Data splits
-
-Each benchmark ships with pre-computed splits produced by `data/<benchmark>/split_dataset.py`:
-
-| Benchmark | Dev (skill learning) | Val (monitoring) | Test (held-out) |
-|-----------|---------------------|-----------------|----------------|
-| OS        | 79 samples (60% of worlds 1–5, 7) | 56 samples | — |
-| DBBench   | 176 samples (60% of standard.jsonl, stratified by type) | 124 samples | 60 samples (dev.jsonl) |
-| ALFWorld  | 30 samples (6 task types × ~5) | 20 samples | 20 samples (dev.json) |
-| Mind2Web  | 60 samples (indices 0–59) | 40 samples (indices 60–99) | — |
-
-**ALFWorld split note**: samples are assigned IDs matching their position in the task's `data_files` list (JSON insertion order from `standard.json`). The split script iterates in insertion order — not alphabetical order — so IDs are consistent with what `AlfWorldTask.get_indices()` returns.
-
-**DBBench split note**: the dev set contains only real `standard.jsonl` entries. Synthetic aggregation samples (IDs ≥ 10000) were removed because they always fail with `START_FAILED` (the task server indexes by position in the dataset, and those IDs are out of bounds).
 
 ## Next Steps
 

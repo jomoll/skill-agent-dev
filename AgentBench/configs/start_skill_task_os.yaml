@@ -14,4 +14,4 @@ controller_port: 5040
 base_port: 5041
 
 start:
-  os-skill: 1
+  os-std: 1

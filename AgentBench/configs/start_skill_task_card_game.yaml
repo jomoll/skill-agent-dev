@@ -10,4 +10,4 @@ definition:
   import: tasks/task_assembly.yaml
 
 start:
-  card-game-skill: 1
+  cg-std: 1

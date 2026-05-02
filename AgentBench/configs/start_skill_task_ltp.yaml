@@ -10,4 +10,4 @@ definition:
   import: tasks/task_assembly.yaml
 
 start:
-  ltp-skill: 1
+  ltp-std: 1

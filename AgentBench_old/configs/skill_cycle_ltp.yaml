@@ -1,0 +1,45 @@
+output_dir: "outputs/skill_cycle_ltp"
+
+# Agent using Vertex AI Gemini
+agent:
+  module: src.client.agents.VertexAgent
+  parameters:
+    project_id: "johannes-moll"
+    location: "us-central1"
+    model: "gemini-3.1-flash-lite-preview"
+    temperature: 0.2
+    max_output_tokens: 32768
+
+
+# Task worker (must be running before starting this script)
+# Start with: python -m src.start_task -a --config configs/start_skill_task_ltp.yaml --controller-port 5020 --base-port 5021
+task:
+  name: "ltp-skill"
+  controller_address: "http://localhost:5020/api"
+
+# Data splits produced by data/lateralthinkingpuzzle/split_dataset.py
+data:
+  dev: "data/lateralthinkingpuzzle/split_dev.json"   # 30 samples (60% of standard.xlsx) — skill learning
+  val: "data/lateralthinkingpuzzle/split_val.json"   # 20 samples (40% of standard.xlsx) — monitoring
+  # test: data/lateralthinkingpuzzle/split_test.json  # 20 samples (dev.xlsx, evaluated via ltp-dev task)
+
+# Task-specific eval function
+eval:
+  module: src.server.tasks.ltp.eval
+
+# Skill library
+skills:
+  base_dir: "skills/ltp/base"
+
+# Training loop hyperparameters
+# LTP tasks are expensive (25 rounds × 2 LLM calls each) — keep concurrency low.
+cycle:
+  epochs: 5
+  update_every: 30        # 1 batch per epoch (full epoch) over 30 dev samples
+  batch_concurrency: 8   # Docker container per sample (similar to OS)
+  max_proposals: 1       # one change per proposal call; best-of-K selects the winner
+  max_learned_skills: 10
+  grpo_k: 4              # candidate proposals sampled per update
+  grpo_eval_n: 20        # ~65% of dev; LTP tasks are slow but probe needs reliable signal
+  run_baseline: true     # run a silent val eval before epoch 0
+  proposal_temperature: 0.8  # high temperature for diverse skill proposals (separate from agent temperature)

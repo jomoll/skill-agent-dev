@@ -1,0 +1,9 @@
+module: src.client.agents.VertexAgent
+parameters:
+  # Vertex AI Gemini with automatic OAuth2 authentication
+  # Uses application default credentials (gcloud auth application-default login)
+  project_id: "johannes-moll"
+  location: "us-central1"
+  model: "gemini-3.1-flash-lite-preview"
+  temperature: 0
+  max_output_tokens: 32768

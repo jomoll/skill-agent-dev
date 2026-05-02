@@ -5,6 +5,7 @@ Uses Google Cloud authentication (application default credentials or service acc
 to automatically manage OAuth2 tokens for Vertex AI API calls.
 """
 
+import json
 import time
 import requests
 from typing import List, Dict, Any, Optional
@@ -94,30 +95,118 @@ class VertexAgent(AgentClient):
             "Content-Type": "application/json"
         }
 
-    def _format_messages(self, history: List[dict]) -> Dict[str, Any]:
+    @staticmethod
+    def _openai_tools_to_gemini(tools: Optional[List[Dict[str, Any]]]) -> Optional[List[Dict[str, Any]]]:
+        if not tools:
+            return None
+        declarations = []
+        for tool in tools:
+            if tool.get("type") != "function":
+                continue
+            function = dict(tool.get("function", {}))
+            if "parameters" in function:
+                function["parameters"] = dict(function["parameters"])
+            declarations.append(function)
+        if not declarations:
+            return None
+        return [{"functionDeclarations": declarations}]
+
+    def _format_messages(
+        self,
+        history: List[dict],
+        tools: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
         """Convert AgentBench message format to Vertex AI Gemini format."""
         role_map = {
             "user": "user",
             "agent": "model",
+            "assistant": "model",
         }
 
         contents = []
+        system_parts = []
+        tool_call_names = {}
         for msg in history:
-            role = role_map.get(msg["role"], "user")
+            role = msg.get("role", "user")
+            content = msg.get("content")
+
+            if role == "system":
+                if content:
+                    system_parts.append({"text": str(content)})
+                continue
+
+            if role in ("assistant", "agent") and msg.get("tool_calls"):
+                parts = []
+                if content:
+                    parts.append({"text": str(content)})
+                call_summaries = []
+                for tool_call in msg.get("tool_calls") or []:
+                    function = tool_call.get("function", {})
+                    name = function.get("name", "")
+                    if tool_call.get("id") and name:
+                        tool_call_names[tool_call["id"]] = name
+                    call_summaries.append(
+                        f"Called tool {name} with arguments {function.get('arguments') or '{}'}."
+                    )
+                if call_summaries:
+                    parts.append({"text": "\n".join(call_summaries)})
+                contents.append({"role": "model", "parts": parts})
+                continue
+
+            if role == "tool":
+                call_id = msg.get("tool_call_id", "")
+                name = msg.get("name") or tool_call_names.get(call_id, "tool")
+                contents.append({
+                    "role": "user",
+                    "parts": [{"text": f"Tool result from {name}: {content or ''}"}],
+                })
+                continue
+
             contents.append({
-                "role": role,
-                "parts": [{"text": msg["content"]}]
+                "role": role_map.get(role, "user"),
+                "parts": [{"text": str(content or "")}]
             })
 
-        return {
+        body = {
             "contents": contents,
             "generationConfig": {
                 "temperature": self.temperature,
                 "maxOutputTokens": self.max_output_tokens
             }
         }
+        if system_parts:
+            body["systemInstruction"] = {"parts": system_parts}
+        gemini_tools = self._openai_tools_to_gemini(tools)
+        if gemini_tools:
+            body["tools"] = gemini_tools
+        return body
 
-    def inference(self, history: List[dict]) -> str:
+    @staticmethod
+    def _parse_response_message(result: Dict[str, Any]):
+        parts = result["candidates"][0]["content"].get("parts", [])
+        text_parts = []
+        tool_calls = []
+        for idx, part in enumerate(parts):
+            if "text" in part:
+                text_parts.append(part["text"])
+            if "functionCall" in part:
+                function_call = part["functionCall"]
+                name = function_call.get("name", "")
+                args = function_call.get("args", {})
+                tool_calls.append({
+                    "id": f"call_vertex_{idx}",
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "arguments": json.dumps(args),
+                    },
+                })
+        content = "\n".join(text_parts)
+        if tool_calls:
+            return {"role": "assistant", "content": content or None, "tool_calls": tool_calls}
+        return content
+
+    def inference(self, history: List[dict], tools: Optional[List[Dict[str, Any]]] = None):
         """
         Run inference on the Vertex AI Gemini model.
 
@@ -133,13 +222,13 @@ class VertexAgent(AgentClient):
         for attempt in range(max_retries):
             try:
                 headers = self._get_auth_header()
-                body = self._format_messages(history)
+                body = self._format_messages(history, tools=tools)
 
                 resp = requests.post(
                     self.endpoint,
                     json=body,
                     headers=headers,
-                    timeout=120
+                    timeout=300
                 )
 
                 if resp.status_code == 429:
@@ -161,8 +250,7 @@ class VertexAgent(AgentClient):
 
                 result = resp.json()
 
-                # Extract text from Gemini response format
-                return result["candidates"][0]["content"]["parts"][0]["text"]
+                return self._parse_response_message(result)
 
             except Exception as e:
                 if attempt == max_retries - 1:

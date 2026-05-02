@@ -1,4 +1,5 @@
 import enum
+import inspect
 
 import requests
 
@@ -15,9 +16,33 @@ class TaskError(enum.Enum):
     NOT_AVAILABLE = "NOT_AVAILABLE"
 
 
+def _run_agent_inference(agent: AgentClient, output: dict):
+    history = output["history"]
+    tools = output.get("tools")
+    if tools is not None:
+        try:
+            signature = inspect.signature(agent.inference)
+            if "tools" in signature.parameters:
+                return agent.inference(history, tools=tools)
+        except (TypeError, ValueError):
+            pass
+    return agent.inference(history)
+
+
+def _to_agent_output(inference_result) -> AgentOutput:
+    if isinstance(inference_result, list):
+        return AgentOutput(messages=inference_result)
+    if isinstance(inference_result, dict):
+        if "messages" in inference_result:
+            return AgentOutput(messages=inference_result["messages"])
+        if inference_result.get("role") or inference_result.get("tool_calls"):
+            return AgentOutput(messages=[inference_result])
+    return AgentOutput(content=str(inference_result))
+
+
 class TaskClient:
     def __init__(
-        self, name: str, controller_address: str = "http://localhost:5001/api", *_, **__,
+        self, name: str, controller_address: str = "http://localhost:5000/api", *_, **__,
     ) -> None:
         self.name = name
         self.controller_address = controller_address
@@ -72,8 +97,7 @@ class TaskClient:
         latest_result = result
         while SampleStatus(result["output"]["status"]) == SampleStatus.RUNNING:
             try:
-                content = agent.inference(result["output"]["history"])
-                response = AgentOutput(content=content)
+                response = _to_agent_output(_run_agent_inference(agent, result["output"]))
             except AgentContextLimitException:
                 response = AgentOutput(status=AgentOutputStatus.AGENT_CONTEXT_LIMIT)
             except Exception as e:

@@ -1,6 +1,7 @@
 import asyncio
 from typing import Union, List, Dict, Any
 
+from agentrl.worker.typings import RewardHistoryItem
 from src.typings import (
     TaskOutput,
     AgentOutput,
@@ -11,13 +12,14 @@ from src.typings import (
 
 
 class SessionController:
-    def __init__(self):
+    def __init__(self, tools: Union[List[Dict[str, Any]], None] = None):
         self.agent_lock = asyncio.Lock()
         self.env_lock = asyncio.Lock()
         self.agent_signal = asyncio.Semaphore(0)
         self.env_signal = asyncio.Semaphore(0)
         self.env_input: Union[None, AgentOutput] = None
         self.env_output = TaskOutput()
+        self.tools = tools
 
     async def agent_pull(
         self, env_input: Union[AgentOutput, None] = None
@@ -35,6 +37,7 @@ class SessionController:
         print(">> env pull waiting")
         async with self.env_lock:
             self.env_output.history = history
+            self.env_output.tools = self.tools
             self.agent_signal.release()
             await self.env_signal.acquire()
             return self.env_input
@@ -61,15 +64,17 @@ class SessionController:
 
 
 class Session:
-    def __init__(self) -> None:
+    def __init__(self, tools: Union[List[Dict[str, Any]], None] = None) -> None:
         self.history: List[ChatHistoryItem] = []
-        self.controller = SessionController()
+        self.controller = SessionController(tools=tools)
 
     def inject(self, item):
         if not item:
             return
         if isinstance(item, ChatHistoryItem):
             self.history.append(item)
+        elif isinstance(item, RewardHistoryItem):
+            return
         elif isinstance(item, Dict):
             self.history.append(ChatHistoryItem.parse_obj(item))
         elif isinstance(item, List):
@@ -110,24 +115,22 @@ class Session:
         return segments
 
     def filter_messages(self, messages: List[ChatHistoryItem]) -> List[ChatHistoryItem]:
-        assert len(messages) % 2 == 1, "Invalid message length"
-
         threshold_segments = 3500
         return_messages: List[ChatHistoryItem] = []
         # only include the latest {threshold_segments} segments
 
-        segments = self._calc_segments(messages[0].content)
+        if not messages:
+            return []
+
+        segments = self._calc_segments(messages[0].content or "")
 
         for message in messages[:0:-1]:
-            segments += self._calc_segments(message.content)
+            segments += self._calc_segments(message.content or "")
             if segments >= threshold_segments:
                 break
             return_messages.append(message)
 
-        if len(return_messages) > 0 and return_messages[-1].role == "user":
-            return_messages.pop()
-
-        instruction = messages[0].content
+        instruction = messages[0].content or ""
 
         omit = len(messages) - len(return_messages) - 1
 
@@ -135,7 +138,7 @@ class Session:
             instruction += f"\n\n[NOTICE] {omit} messages are omitted."
             print(f"Warning: {omit} messages are omitted.")
 
-        return_messages.append(ChatHistoryItem(role="user", content=instruction))
+        return_messages.append(messages[0].copy(update={"content": instruction}))
 
         return_messages.reverse()
         return return_messages
@@ -147,18 +150,23 @@ class Session:
         agent_response = await self.controller.env_pull(
             self.filter_messages(self.history)
         )
-        self.history.append(
-            ChatHistoryItem(
-                role="agent", content=agent_response.content or agent_response.status
+        if agent_response.messages:
+            self.inject(agent_response.messages)
+        else:
+            self.history.append(
+                ChatHistoryItem(
+                    role="assistant",
+                    content=agent_response.content or agent_response.status,
+                )
             )
-        )
         return agent_response
 
 
 class Task:
-    def __init__(self, name: str, concurrency: int = 1, *args, **kwargs):
+    def __init__(self, name: str, concurrency: int = 1, tools=None, *args, **kwargs):
         self.name = name
         self.concurrency = concurrency
+        self.tools = tools
 
     def get_indices(self) -> List[SampleIndex]:
         raise NotImplementedError()

@@ -21,7 +21,7 @@ agent:
 # Task worker (must be running before starting this script)
 # Start with: python -m src.start_task -a --config configs/start_skill_task_mind2web.yaml --controller-port 5070 --base-port 5071
 task:
-  name: "mind2web-skill"
+  name: "m2w-std"
   controller_address: "http://localhost:5070/api"
 
 # 60/40 split of the first 100 samples from the Mind2Web dev set

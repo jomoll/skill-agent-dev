@@ -35,14 +35,14 @@ Be specific about when the agent should actively recall this skill.
 Bullet list. Reference exact SQL constructs, column names, or output formats.
 
 - Example: using `COUNT(*)` instead of `COUNT(DISTINCT col)` when duplicates exist
-- Example: returning `["3.5"]` (string) when the answer expects `[3.5]` (float) —
-  the Final Answer format must match exactly
+- Example: submitting `["3.5"]` (string) when the answer expects `[3.5]` (float) —
+  the `commit_final_answer` payload must match exactly
 - Example: not wrapping table/column names in backticks when they contain spaces
 - Cover both obvious failures and subtle regressions
 
 ## Recommended Patterns
 
-Step-by-step operational guidance. Name exact SQL clauses or answer formats.
+Step-by-step operational guidance. Name exact SQL clauses or tool payload formats.
 
 **Pattern 1: core query strategy**
 Describe what to do, in order. Show the exact SQL structure.
@@ -56,14 +56,15 @@ WRONG:
 SELECT COUNT(`column_name`) FROM `table_name` WHERE condition;
 ```
 
-**Pattern 2: answer format rule**
-How to structure the Final Answer for this query type.
+**Pattern 2: answer payload rule**
+How to structure the `commit_final_answer` payload for this query type.
 
-CORRECT: `Final Answer: ["March 19, 1998"]`
-WRONG:   `Final Answer: March 19, 1998`
+CORRECT: call `commit_final_answer` with `{"answers": ["March 19, 1998"]}`
+WRONG:   write `March 19, 1998` in assistant text without calling the tool
 
 **Pattern 3: mutation verification**
-For INSERT/UPDATE/DELETE tasks, commit and verify the change before answering.
+For INSERT/UPDATE/DELETE tasks, use `execute_sql` for the mutation, verify the
+changed rows with a targeted `SELECT`, then call `commit_final_answer`.
 
 ## Example Application
 
@@ -76,7 +77,9 @@ At least one worked example with explicit steps.
 1. Query the table schema to confirm column order.
 2. Construct the INSERT with backtick-quoted column names.
 3. Execute and check the MySQL response for errors.
-4. Commit (no explicit answer needed — write `Final Answer: done`).
+4. Verify the inserted row with a targeted SELECT.
+5. Commit with `commit_final_answer` using a minimal payload such as
+   `{"answers": ["done"]}`.
 
 CORRECT SQL:
 ```sql
@@ -90,7 +93,7 @@ Observable signs the skill was applied correctly.
 ## Failure Indicators
 
 Observable signs something went wrong despite following the skill. Include
-both wrong SQL (syntax, logic) and wrong answer format failures.
+both wrong SQL (syntax, logic) and wrong tool-payload failures.
 
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: mutation_execute_then_stop
-description: After a valid INSERT or UPDATE executes, stop issuing extra SQL and end with a minimal final answer.
+description: After a valid INSERT or UPDATE executes and is verified, stop issuing extra SQL and submit a minimal tool answer.
 tags:
 - sql
 - mutation
@@ -22,19 +22,20 @@ The agent performs the correct `INSERT` or `UPDATE`, then:
 - or otherwise corrupts a potentially correct trajectory.
 
 ## Action Rule
-After one successful mutation statement, immediately end the interaction with:
-`Action: Answer`
-`Final Answer: ["done"]`
+After one successful mutation statement and one targeted verification SELECT,
+end the interaction by calling `commit_final_answer` with:
+`{"answers": ["done"]}`
 
 Use additional SQL only if the mutation itself clearly failed.
 
 ## Verification Rule
-Treat "no SQL error returned" as enough to stop for mutation tasks in this benchmark setting. Do not invent DB-specific verification functions or extra bookkeeping.
+Use one targeted `SELECT` to verify the row or field that was changed. Do not
+invent DB-specific verification functions or extra bookkeeping.
 
 ## Do Not
-- Do not call functions like `MD5(...)`.
+- Do not call SQL functions like `MD5(...)` to calculate benchmark hashes.
 - Do not summarize the change in prose.
-- Do not run a second SQL statement unless the first one failed.
+- Do not run broad exploratory SQL after the targeted verification query.
 
 ## Example Pattern
 Wrong:
@@ -50,6 +51,5 @@ UPDATE `Actress Filmography` SET `Year` = '2010', `Notes` = 'romantic comedy' WH
 
 Then:
 ```text
-Action: Answer
-Final Answer: ["done"]
+commit_final_answer({"answers": ["done"]})
 ```

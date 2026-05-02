@@ -114,6 +114,7 @@ class TaskWorker:
                 status=SampleStatus.TASK_ERROR,
                 result=error,
                 history=session.history,
+                tools=getattr(self.task, "tools", None),
             ))
             return
         self.session_map.pop(session_id)
@@ -122,6 +123,7 @@ class TaskWorker:
             status=result.status,
             result=result.result,
             history=session.history,
+            tools=getattr(self.task, "tools", None),
         ))
 
     async def start_sample(self, parameters: WorkerStartSampleRequest):
@@ -135,7 +137,7 @@ class TaskWorker:
                     status_code=406,
                     detail="Sample concurrency limit reached: %d" % self.task.concurrency,
                 )
-            session = Session()
+            session = Session(tools=getattr(self.task, "tools", None))
             print("session created")
             task_executor = self.task_start_sample_wrapper(
                 parameters.index, session, parameters.session_id

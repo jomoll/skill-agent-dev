@@ -1,0 +1,23 @@
+default:
+  module: src.server.tasks.card_game.CardGame
+  docker:
+    image: longinyu/agentbench-card_game
+  parameters:
+    port: 12347
+    workers: 10
+
+cg-dev:
+  parameters:
+    name: "CardGame-dev"
+    test_time: 3
+
+cg-std:
+  parameters:
+    name: "CardGame-std"
+    test_time: 5
+
+card-game-skill:
+  parameters:
+    name: "card-game-skill"
+    concurrency: 1
+    test_time: 25   # 4 combos × 25 reps = 100 total (60 dev / 20 val / 20 test)

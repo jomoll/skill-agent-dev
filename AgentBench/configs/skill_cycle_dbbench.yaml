@@ -4,10 +4,10 @@ output_dir: "outputs/skill_cycle_dbbench"
 agent:
   module: src.client.agents.VertexAgent
   parameters:
-    project_id: "gen-lang-client-0167970622"
+    project_id: "johannes-moll"
     location: "us-central1"
-    model: "gemini-3.1-pro-preview"
-    temperature: 0.2
+    model: "gemini-3.1-flash-lite-preview"
+    temperature: 0
     max_output_tokens: 32768
 
 # Task worker (must be running before starting this script)

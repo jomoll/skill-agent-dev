@@ -25,7 +25,7 @@ Skills named "skeleton" (the read-only base template) are never injected.
 If no skills exist and the task is not DBBench, history is passed through unchanged.
 """
 
-from typing import List
+from typing import Any, Dict, List
 
 from ..agent import AgentClient
 from src.skills.repository import SkillRepository
@@ -37,13 +37,13 @@ class SkillAwareAgent(AgentClient):
         self.agent = agent
         self.skill_repo = skill_repo
 
-    def inference(self, history: List[dict]) -> str:
+    def inference(self, history: List[dict], tools=None):
         skills = [s for s in self.skill_repo.load_all() if s["name"] != "skeleton"]
-        first_content = history[0]["content"]
+        first_content = self._message_content(history[0]) if history else ""
         is_dbbench = self._is_dbbench_prompt(first_content)
 
         if not skills and not is_dbbench:
-            return self.agent.inference(history)
+            return self._delegate(history, tools=tools)
 
         suffix_parts = []
         if skills:
@@ -53,9 +53,12 @@ class SkillAwareAgent(AgentClient):
 
         skill_block = "\n\n" + "\n\n".join(suffix_parts)
 
-        modified = list(history)
+        modified = [self._message_to_dict(message) for message in history]
         last_user_idx = max(
-            (i for i, m in enumerate(modified) if m.get("role") == "user"),
+            (
+                i for i, m in enumerate(modified)
+                if m.get("role") in ("user", "system")
+            ),
             default=0,
         )
 
@@ -70,14 +73,53 @@ class SkillAwareAgent(AgentClient):
         if is_first_decision:
             # Prepend: skills appear before the task instruction so the model
             # processes behavioural rules before reading the task and acting.
-            new_content = skill_block.lstrip("\n") + "\n\n" + modified[last_user_idx]["content"]
+            new_content = (
+                skill_block.lstrip("\n")
+                + "\n\n"
+                + (modified[last_user_idx].get("content") or "")
+            )
         else:
             # Append: skills stay at the recency-favoured end of the context,
             # immediately before generation on continuation turns.
-            new_content = modified[last_user_idx]["content"] + skill_block
+            new_content = (modified[last_user_idx].get("content") or "") + skill_block
 
-        modified[last_user_idx] = {"role": "user", "content": new_content}
-        return self.agent.inference(modified)
+        modified[last_user_idx] = dict(modified[last_user_idx], content=new_content)
+        return self._delegate(modified, tools=tools)
+
+    def _delegate(self, history: List[dict], tools=None):
+        if tools is not None:
+            try:
+                return self.agent.inference(history, tools=tools)
+            except TypeError:
+                pass
+        return self.agent.inference(history)
+
+    @staticmethod
+    def _message_to_dict(message: Any) -> Dict[str, Any]:
+        if isinstance(message, dict):
+            return dict(message)
+        if hasattr(message, "model_dump"):
+            return message.model_dump(exclude_none=True)
+        if hasattr(message, "dict"):
+            return message.dict(exclude_none=True)
+        return {
+            "role": getattr(message, "role", "user"),
+            "content": getattr(message, "content", ""),
+        }
+
+    @classmethod
+    def _message_content(cls, message: Any) -> str:
+        item = cls._message_to_dict(message)
+        content = item.get("content") or ""
+        if isinstance(content, list):
+            parts = []
+            for part in content:
+                if isinstance(part, dict):
+                    parts.append(str(part.get("text", "")))
+                else:
+                    parts.append(str(part))
+            return "\n".join(parts)
+        return str(content)
 
     @staticmethod
     def _render_skills(skills: list) -> str:
@@ -103,16 +145,18 @@ class SkillAwareAgent(AgentClient):
         text = content.lower()
         return (
             "help me operate a mysql database with sql" in text
-            or ("action: operation" in text and "final answer:" in text and "mysql" in text)
+            or "execute_sql" in text
+            or "commit_final_answer" in text
         )
 
     @staticmethod
     def _dbbench_protocol() -> str:
         return (
             "---\n"
-            "**SQL protocol reminder:** output exactly one valid action each turn.\n"
-            "- To query or modify the database: Action: Operation + SQL block\n"
-            "- When done: Action: Answer + Final Answer: [\"...\"]\n"
-            "Never output placeholders. Never omit the Action line.\n"
-            "For INSERT/UPDATE tasks, verify with a targeted SELECT before answering."
+            "**SQL tool reminder:** use the provided DBBench tools; do not write "
+            "tool invocations as plain text.\n"
+            "- Query or mutate the database with `execute_sql`.\n"
+            "- Submit the answer with `commit_final_answer` only when done.\n"
+            "- For INSERT/UPDATE/DELETE tasks, verify the changed rows with a "
+            "targeted SELECT before submitting."
         )

@@ -9,7 +9,6 @@ import:
   - card_game.yaml
   - kg.yaml
   - os.yaml
-  - os_skill.yaml
   - ltp.yaml
   - alfworld.yaml
   - avalon.yaml

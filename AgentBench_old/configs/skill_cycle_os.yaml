@@ -1,0 +1,43 @@
+output_dir: "outputs/skill_cycle_os"
+
+# Agent using Vertex AI Gemini
+agent:
+  module: src.client.agents.VertexAgent
+  parameters:
+    project_id: "johannes-moll"
+    location: "us-central1"
+    model: "gemini-3.1-pro-preview"
+    temperature: 0.2
+    max_output_tokens: 32768
+
+
+# Task worker (must be running before starting this script)
+# Start with: python -m src.start_task -a --config configs/start_skill_task_os.yaml --controller-port 5040 --base-port 5041
+task:
+  name: "os-skill"
+  controller_address: "http://localhost:5040/api"
+
+# Data splits produced by data/os_interaction/split_dataset.py
+data:
+  dev: "data/os_interaction/split_dev.json"   # 79 samples (60% of worlds 1-5, 7) — skill learning
+  val: "data/os_interaction/split_val.json"   # 56 samples (40% of worlds 1-5, 7) — monitoring
+
+# Task-specific eval function
+eval:
+  module: src.server.tasks.os_interaction.eval
+
+# Skill library
+skills:
+  base_dir: "skills/os/base"
+
+# Training loop hyperparameters
+cycle:
+  epochs: 5
+  update_every: 40        # 1 batch per epoch (full epoch) over 79 dev samples
+  batch_concurrency: 8    # parallel samples per batch (task worker supports up to 24)
+  max_proposals: 1        # one change per proposal call; best-of-K selects the winner
+  max_learned_skills: 10
+  grpo_k: 4               # candidate proposals sampled per update
+  grpo_eval_n: 30         # probe set size: grpo_eval_n/2 failing + grpo_eval_n/2 passing (~45% of failures)
+  run_baseline: true      # run a silent val eval before epoch 0
+  proposal_temperature: 0.8  # high temperature for diverse skill proposals (separate from agent temperature)

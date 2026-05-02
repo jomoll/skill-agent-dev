@@ -15,10 +15,3 @@ ltp-std:
   parameters:
     name: ltp-std
     filepath: "data/lateralthinkingpuzzle/standard.xlsx"
-
-ltp-skill:
-  parameters:
-    name: ltp-skill
-    concurrency: 8
-    filepath: "data/lateralthinkingpuzzle/standard.xlsx"
-    eval_yaml: "configs/agents/ltp_eval_http.yaml"

@@ -41,5 +41,8 @@ class Assignment(BaseModel):
 
 
 class ChatHistoryItem(BaseModel):
-    role: Literal["user", "agent"]
-    content: str
+    role: Literal["system", "user", "agent", "assistant", "tool"]
+    content: Union[str, None] = None
+    tool_calls: Union[List[Dict[str, Any]], None] = None
+    tool_call_id: Union[str, None] = None
+    name: Union[str, None] = None

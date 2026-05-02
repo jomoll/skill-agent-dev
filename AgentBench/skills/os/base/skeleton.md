@@ -35,7 +35,7 @@ observable situation, not just the abstract category.
 ## Common Failure Patterns
 
 Bullet list. Be specific — reference exact commands, flags, output fields,
-or answer formats when that is the real source of failure.
+or tool payload formats when that is the real source of failure.
 
 - Example: using `cat` on a large file when `wc -l` or `grep -c` would give
   the count directly without truncation risk
@@ -58,7 +58,7 @@ WRONG:   `ls /etc` then counting manually from truncated output
 What to do when the primary strategy fails or returns no results.
 
 **Pattern 3: formatting or answer rule**
-How to structure the final answer or `answer(...)` call.
+How to structure the final `answer_action` payload.
 
 ## Example Application
 
@@ -72,10 +72,10 @@ the value extracted or decision made, and the correct answer format.
 1. Run the appropriate command (show the exact bash snippet).
 2. Parse the relevant field from the output (name it explicitly).
 3. Apply any threshold or transformation.
-4. Call `answer(...)` or `finish` with the correct format.
+4. Call `answer_action` or `finish_action` with the correct payload.
 
-CORRECT output: `Act: answer(220)`
-WRONG output:   `Act: answer(There are 220 files in /etc)`
+CORRECT output: call `answer_action` with `{"answer": "220"}`
+WRONG output:   write `There are 220 files in /etc` as assistant text
 
 ## Success Indicators
 

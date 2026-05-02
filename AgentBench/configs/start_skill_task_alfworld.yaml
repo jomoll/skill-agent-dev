@@ -10,4 +10,4 @@ definition:
   import: tasks/task_assembly.yaml
 
 start:
-  alfworld-skill: 1
+  alfworld-std: 1

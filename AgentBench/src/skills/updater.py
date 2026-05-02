@@ -333,6 +333,7 @@ Rules:
 - Prefer reusable capability skills over narrow one-task recipes, but do not broaden a skill so much that it stops changing behavior.
 - One skill must target exactly one failure mechanism.
 - A good skill must change the agent's next action, query, parsing step, or verification behavior.
+- Prefer CONSTRAINT skills over WORKFLOW EXPANSION skills. A constraint skill changes the form of one existing step: "include multiple columns in the WHERE clause instead of one", "CAST the year column to UNSIGNED before ordering", "backtick-quote column names that contain spaces". A workflow expansion skill adds new mandatory intermediate steps: "run a SELECT before every UPDATE to pre-check the row", "verify the insertion with a SELECT after INSERT". Constraint skills are safe — they do not consume extra rounds and do not disrupt already-correct solutions. Workflow expansion skills cause regressions: the extra SELECT rounds cost turn budget from tasks the agent currently solves efficiently in fewer steps.
 - If a proposal would only change wording, tone, or answer style, reject it unless the dominant failure is invalid protocol.
 - Keep concrete operational detail. Do not broaden into vague generic skills or mini-tutorials.
 - The `## Example Trajectory` section is required. Write one wrong and one correct trajectory of 2–3 turns each. Show the full Think → Act → Obs → Think → Act sequence. Do not use static code-pair examples — the trajectory must show the agent reasoning, acting, and receiving an observation.
@@ -340,7 +341,7 @@ Rules:
 - Use specific commands, flags, SQL fragments, error messages, output patterns, or observable triggers as examples when possible.
 - Use the selected trace context to identify whether the real issue is schema inference, row selection, column selection, identifier quoting, mutation construction, output parsing, answer formatting, or verification logic.
 - Treat failure tags as strong hints about the dominant mechanism.
-- For DBBench SQL tasks, prioritize protocol compliance, identifier quoting, schema exploration, mutation verification, and avoiding premature "cannot answer" responses.
+- For DBBench SQL tasks, prioritize protocol compliance, identifier quoting, schema exploration, WHERE clause precision, and avoiding premature "cannot answer" responses.
 - Do not propose generic "verify more", "format better", or "be careful" skills if an existing learned skill already covers that behavior.
 - Do not restate an existing skill with synonyms. If the mechanism is already covered, return [] or propose a narrow MODIFY with a clear missing trigger or action rule.
 - Before proposing ADD, check whether any existing learned skill already targets the same failure mechanism (same trigger, same corrective action). If one does, MODIFY it instead of adding a duplicate.
@@ -356,6 +357,7 @@ Rules:
   2. What exact behavior changes because of it?
   3. Why would that flip at least one failing sample in this batch?
   4. Is this already covered by an existing learned skill?
+  5. Is the trigger condition unambiguous — could it fire on a task where the current behavior is already correct? A trigger like "when the query returns empty results" is unsafe if an empty result is also the correct answer for some tasks (e.g., COUNT=0, no matching rows). Only use triggers that cannot fire on correct behavior.
 - Skills should prefer realistic example identifiers from the trace pattern over placeholders like `table_name` and `column1`, but must remain mechanism-level and reusable.
 - Skill writing style:
   - All section headers must use `##` markdown (h2). Never use bold text like `**Section Name**` as a header.

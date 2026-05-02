@@ -74,23 +74,21 @@ Provide one wrong trajectory and one correct trajectory showing 2–3 turns each
 Use a realistic task instruction and realistic actions/observations.
 The wrong trajectory must show the exact failure this skill prevents.
 The correct trajectory must show the exact behaviour this skill produces.
+Use the benchmark's native tool names and payloads in examples. Do not invent
+text-only protocol wrappers such as `Think:` or `Act:`.
 
 **WRONG trajectory:**
 Task: "[task instruction]"
-Turn 1 — Think: [agent reasoning that leads to the failure]
-          Act: [wrong action]
+Turn 1 tool call: [wrong tool name and payload]
 Obs: [observation]
-Turn 2 — Think: [reasoning showing the failure taking hold]
-          Act: [wrong answer or wrong follow-up]
+Turn 2 tool call: [wrong answer or wrong follow-up tool payload]
 → FAIL
 
 **CORRECT trajectory:**
 Task: "[same task instruction]"
-Turn 1 — Think: [agent reasoning that applies this skill]
-          Act: [correct first action]
+Turn 1 tool call: [correct tool name and payload]
 Obs: [observation]
-Turn 2 — Think: [agent reasoning leading to correct conclusion]
-          Act: [correct answer or correct follow-up]
+Turn 2 tool call: [correct answer or correct follow-up tool payload]
 → PASS
 
 ## Notes

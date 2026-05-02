@@ -4,7 +4,7 @@ output_dir: "outputs/skill_cycle_ltp"
 agent:
   module: src.client.agents.VertexAgent
   parameters:
-    project_id: "gen-lang-client-0167970622"
+    project_id: "johannes-moll"
     location: "us-central1"
     model: "gemini-3.1-flash-lite-preview"
     temperature: 0.2
@@ -14,7 +14,7 @@ agent:
 # Task worker (must be running before starting this script)
 # Start with: python -m src.start_task -a --config configs/start_skill_task_ltp.yaml --controller-port 5020 --base-port 5021
 task:
-  name: "ltp-skill"
+  name: "ltp-std"
   controller_address: "http://localhost:5020/api"
 
 # Data splits produced by data/lateralthinkingpuzzle/split_dataset.py

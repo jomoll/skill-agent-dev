@@ -38,7 +38,7 @@ Only conclude "cannot answer" if:
 ## Example Pattern
 Wrong:
 ```text
-Final Answer: ["I cannot answer this question because the database does not contain any tables."]
+commit_final_answer({"answers": ["I cannot answer this question because the database does not contain any tables."]})
 ```
 
 Correct:

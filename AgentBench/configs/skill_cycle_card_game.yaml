@@ -4,7 +4,7 @@ output_dir: "outputs/skill_cycle_card_game"
 agent:
   module: src.client.agents.VertexAgent
   parameters:
-    project_id: "gen-lang-client-0167970622"
+    project_id: "johannes-moll"
     location: "us-central1"
     model: "gemini-3.1-flash-lite-preview"
     temperature: 0.2
@@ -14,7 +14,7 @@ agent:
 # Task worker (must be running before starting this script)
 # Start with: python -m src.start_task -a --config configs/start_skill_task_card_game.yaml --controller-port 5030 --base-port 5031
 task:
-  name: "card-game-skill"
+  name: "cg-std"
   controller_address: "http://localhost:5030/api"
 
 # Data splits produced by data/card_game/split_dataset.py

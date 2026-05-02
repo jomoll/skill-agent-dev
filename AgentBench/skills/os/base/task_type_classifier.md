@@ -11,7 +11,7 @@ language. Confusing them is one of the most common failure modes: the agent eith
 commands and returns a number when it should output a script, or writes a script when it should
 run commands and return the result.
 
-**Before your first `Act:` in any OS task, classify the task type.** This takes one internal
+**Before your first OS tool call, classify the task type.** This takes one internal
 reasoning step and costs nothing, but prevents a category of failures that cannot be recovered
 from once the wrong path is taken.
 
@@ -33,7 +33,8 @@ observed value (a number, string, file path, etc.) as the final answer.
 - "output the result of running"
 - Refers to files or state that plausibly exist on the live system
 
-**Action:** Execute bash commands, observe real output, submit the value with `answer(...)`.
+**Action:** Execute commands with `bash_action`, observe real output, submit the
+value with `answer_action`.
 
 ### Type B — Write a Command or Script
 
@@ -49,7 +50,8 @@ You are not expected to run it to get a result; the command text is the delivera
   "N files", "some log file"
 - The object of the task does not plausibly exist on the live system
 
-**Action:** Write the command or script directly and submit it with `answer(...)`.
+**Action:** Write the command or script directly and submit it with
+`answer_action`.
 **Do NOT execute it to obtain a numeric result** — the command text is the answer.
 
 ## Common Failure Patterns
@@ -73,7 +75,7 @@ under a given directory."
 
 Classification: **Type B** — "a given directory" is a placeholder; task asks for a command.
 
-CORRECT: `answer("find /given_dir -name '*.py' | xargs wc -l | tail -1")`
+CORRECT: call `answer_action` with `{"answer": "find /given_dir -name '*.py' | xargs wc -l | tail -1"}`
 WRONG:   Execute `wc -l` on a real directory and return an integer.
 
 ---
@@ -82,8 +84,8 @@ WRONG:   Execute `wc -l` on a real directory and return an integer.
 
 Classification: **Type A** — refers to a live path, asks for an observed count.
 
-CORRECT: `Act: bash\nfind /home/ubuntu -mindepth 1 -maxdepth 1 -type d | wc -l`
-         then `answer(<result>)`
+CORRECT: call `bash_action` with `{"script": "find /home/ubuntu -mindepth 1 -maxdepth 1 -type d | wc -l"}`
+         then call `answer_action` with the observed result
 WRONG:   Output a `find` command string as the answer.
 
 ## Success Indicators

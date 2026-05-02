@@ -111,6 +111,8 @@ def _score_result(sample: Dict, result: TaskClientOutput,
         return False
     if result.output.result is None:
         return False
+    if isinstance(result.output.result, dict) and "is_correct" in result.output.result:
+        return result.output.result.get("is_correct") is True
     if eval_fn is None:
         return False
     try:
@@ -193,12 +195,26 @@ def _extract_final_answer_from_history(history: List[Dict]) -> str:
         return ""
     for msg in reversed(history):
         role = msg.role if hasattr(msg, "role") else msg.get("role")
-        if role != "agent":
+        if role not in ("agent", "assistant"):
             continue
         content = msg.content if hasattr(msg, "content") else msg.get("content", "")
         if "Final Answer:" in str(content):
             return str(content).split("Final Answer:", 1)[1].strip()
+        tool_calls = msg.tool_calls if hasattr(msg, "tool_calls") else msg.get("tool_calls")
+        for tool_call in tool_calls or []:
+            function = tool_call.get("function", {})
+            if function.get("name") == "commit_final_answer":
+                return function.get("arguments", "")
     return ""
+
+
+def _format_tool_call(tool_call: Dict) -> str:
+    function = tool_call.get("function", {}) if isinstance(tool_call, dict) else {}
+    name = function.get("name", "")
+    arguments = function.get("arguments", "")
+    if name:
+        return f"tool_call:{name}({arguments})"
+    return f"tool_call:{tool_call}"
 
 
 def _is_dbbench_like(sample: Dict, task_output) -> bool:
@@ -240,27 +256,40 @@ def _infer_failure_tags(sample: Dict, result: TaskClientOutput, agent_actions: L
     final_answer = _extract_final_answer_text(agent_actions)
     final_lower = final_answer.lower()
 
+    uses_tools = "tool_call:" in action_text
+
     if status == "agent validation failed":
         tags.append("protocol_invalid")
-        if "Action: Operation" not in action_text and "Action: Answer" not in action_text:
+        if (
+            "Action: Operation" not in action_text
+            and "Action: Answer" not in action_text
+            and "tool_call:" not in action_text
+        ):
             tags.append("no_valid_action")
-        elif "Action: Operation" in action_text and "Action: Answer" not in action_text:
+        elif (
+            ("Action: Operation" in action_text or "tool_call:execute_sql" in action_text)
+            and "Action: Answer" not in action_text
+            and "tool_call:commit_final_answer" not in action_text
+        ):
             tags.append("missing_final_answer")
     elif status == "task limit reached":
         tags.append("task_limit")
 
     if is_mutation:
         tags.append("mutation_task")
-        if "Action: Operation" not in action_text:
+        if "Action: Operation" not in action_text and "tool_call:execute_sql" not in action_text:
             tags.append("mutation_no_sql")
         else:
             has_select = any(
-                "Action: Operation" in action and "SELECT " in action.upper()
+                (
+                    ("Action: Operation" in action or "tool_call:execute_sql" in action)
+                    and "SELECT " in action.upper()
+                )
                 for action in agent_actions or []
             )
-            if not has_select and "Action: Answer" in action_text:
+            if not has_select and ("Action: Answer" in action_text or "tool_call:commit_final_answer" in action_text):
                 tags.append("mutation_unverified")
-        if "Action: Answer" in action_text and final_answer not in ("", "[]"):
+        if not uses_tools and "Action: Answer" in action_text and final_answer not in ("", "[]"):
             tags.append("mutation_natural_language_answer")
     else:
         if query_type.startswith("aggregation-"):
@@ -285,13 +314,25 @@ def _make_log_entry(sample: Dict, result: TaskClientOutput, is_correct: bool,
         for msg in result.output.history:
             role = msg.role if hasattr(msg, "role") else msg["role"]
             content = msg.content if hasattr(msg, "content") else msg["content"]
-            history.append({"role": role, "content": content})
-            if role == "agent":
-                agent_actions.append(content)
+            tool_calls = msg.tool_calls if hasattr(msg, "tool_calls") else msg.get("tool_calls")
+            item = {"role": role, "content": content}
+            if tool_calls:
+                item["tool_calls"] = tool_calls
+            history.append(item)
+            if role in ("agent", "assistant"):
+                agent_actions.append(content or "")
+                for tool_call in tool_calls or []:
+                    agent_actions.append(_format_tool_call(tool_call))
 
     failure_tags = [] if is_correct else _infer_failure_tags(sample, result, agent_actions)
     final_answer = _extract_final_answer_from_history(result.output.history) if result.output else ""
-    task_result = dict(result.output.result) if result.output and result.output.result else None
+    if result.output and result.output.result:
+        if isinstance(result.output.result, dict):
+            task_result = dict(result.output.result)
+        else:
+            task_result = result.output.result
+    else:
+        task_result = None
     ground_truth = sample.get("answer")
 
     return {
@@ -915,9 +956,15 @@ class SkillCycleRunner:
                     for msg in result.output.history:
                         role = msg.role if hasattr(msg, "role") else msg.get("role")
                         content = msg.content if hasattr(msg, "content") else msg.get("content", "")
-                        history.append({"role": role, "content": content})
-                        if role == "agent":
-                            agent_actions.append(content)
+                        tool_calls = msg.tool_calls if hasattr(msg, "tool_calls") else msg.get("tool_calls")
+                        item = {"role": role, "content": content}
+                        if tool_calls:
+                            item["tool_calls"] = tool_calls
+                        history.append(item)
+                        if role in ("agent", "assistant"):
+                            agent_actions.append(content or "")
+                            for tool_call in tool_calls or []:
+                                agent_actions.append(_format_tool_call(tool_call))
                 return is_correct, status, agent_actions, history
 
             with ThreadPoolExecutor(max_workers=self.batch_concurrency) as pool:
@@ -1243,15 +1290,19 @@ class SkillCycleRunner:
                     break
                 time.sleep(5 * (attempt + 1))
             is_correct = _score_result(sample, result, self._eval_fn)
-            return idx, is_correct
+            status = result.output.status if result.output else result.error
+            task_result = result.output.result if result.output else None
+            return idx, is_correct, status, task_result
 
         with ThreadPoolExecutor(max_workers=self.batch_concurrency) as pool:
             futures = {pool.submit(run_one, i, s): i
                        for i, s in enumerate(self.val_data)}
             for future in as_completed(futures):
-                idx, is_correct = future.result()
+                idx, is_correct, status, task_result = future.result()
                 val_entries[idx] = {"sample_id": self.val_data[idx]["id"],
-                                    "is_correct": is_correct}
+                                    "is_correct": is_correct,
+                                    "status": status,
+                                    "result": task_result}
                 if is_correct:
                     correct += 1
 

@@ -1,4 +1,4 @@
-from typing import Union, List
+from typing import Union, List, Dict, Any
 
 from pydantic import BaseModel, root_validator
 
@@ -12,6 +12,7 @@ class TaskOutput(BaseModel):
     status: SampleStatus = SampleStatus.RUNNING
     result: JSONSerializable = None
     history: Union[None, List[ChatHistoryItem]] = None
+    tools: Union[None, List[Dict[str, Any]]] = None
 
 
 class TaskSampleExecutionResult(BaseModel):
@@ -22,6 +23,7 @@ class TaskSampleExecutionResult(BaseModel):
 class AgentOutput(BaseModel):
     status: AgentOutputStatus = AgentOutputStatus.NORMAL
     content: Union[str, None] = None
+    messages: Union[List[Dict[str, Any]], None] = None
 
     # at least one of them should be not None
     @root_validator(pre=False, skip_on_failure=True)
@@ -29,7 +31,8 @@ class AgentOutput(BaseModel):
         assert (
             instance.get("status") is not AgentOutputStatus.NORMAL
             or instance.get("content") is not None
-        ), "If status is NORMAL, content should not be None"
+            or instance.get("messages") is not None
+        ), "If status is NORMAL, content or messages should not be None"
         return instance
 
 

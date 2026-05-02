@@ -7,7 +7,7 @@
 #   python -m src.skill_cycle --config configs/skill_cycle.yaml --run-name run_001
 
 definition:
-  import: tasks/os_skill.yaml
+  import: tasks/task_assembly.yaml
 
 start:
-  os-skill: 5
+  os-std: 5

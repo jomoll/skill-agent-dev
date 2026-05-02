@@ -13,4 +13,4 @@ definition:
   import: tasks/task_assembly.yaml
 
 start:
-  mind2web-skill: 1
+  m2w-std: 1
