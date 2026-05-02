@@ -86,7 +86,7 @@ class WebShop(Task):
                 response = session.sync_action()
 
                 tool_calls = []
-                for message in response.messages:
+                for message in (response.messages or []):
                     tool_calls.extend(message.get('tool_calls', []) or [])
 
                 finish_reason = SampleStatus.COMPLETED

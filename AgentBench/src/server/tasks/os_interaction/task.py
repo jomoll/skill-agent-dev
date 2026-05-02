@@ -179,19 +179,17 @@ class OSInteraction(Task):
                     )
         self.data_config["files"] = matches
 
-        next_idx = 0
         for item in self.data_config["files"]:
             problem_file = item["problem_file"]
+            index_prefix = item["index_prefix"]
             single_file_configs = self._load_configs(problem_file, item["script_dir"])
-            dict_configs = {}
-            for config in single_file_configs:
-                dict_configs[next_idx] = {
+            for i, config in enumerate(single_file_configs):
+                key = f"{index_prefix}{i:05d}"
+                self.problem_configs[key] = {
                     "file": problem_file,
                     "config": config,
-                    "index": next_idx,
+                    "index": key,
                 }
-                next_idx += 1
-            self.problem_configs.update(dict_configs)
 
         logging.info(f"Initialized OSInteraction with {len(self.problem_configs)} problem configs")
 
@@ -549,14 +547,15 @@ Always use a tool provided instead of simply responding with content."""
         # 提取工具调用
         response_content = None
         tool_calls = []
-        for message in response.messages:
+        for message in (response.messages or []):
             if not response_content:
                 response_content = message.get('content')
             tool_calls.extend(message.get('tool_calls', []) or [])
 
         # 检查是否有有效的工具调用
         if len(tool_calls) == 0:
-            logging.warning("Empty tool calls array")
+            preview = (response_content or "").replace("\n", "\\n")[:500]
+            logging.warning("Empty tool calls array; content preview: %s", preview)
             session.inject(ChatCompletionUserMessageParam(
                 role='user',
                 content="No executable tool calls found. Please call a tool instead"
