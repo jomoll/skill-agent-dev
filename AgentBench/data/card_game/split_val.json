@@ -1,0 +1,142 @@
+[
+  {
+    "id": 15,
+    "description": "Card Game stage=2 vs baseline1, agent_position=0, rep=15",
+    "stage": 2,
+    "baseline": "baseline1",
+    "agent": 0
+  },
+  {
+    "id": 16,
+    "description": "Card Game stage=2 vs baseline1, agent_position=0, rep=16",
+    "stage": 2,
+    "baseline": "baseline1",
+    "agent": 0
+  },
+  {
+    "id": 17,
+    "description": "Card Game stage=2 vs baseline1, agent_position=0, rep=17",
+    "stage": 2,
+    "baseline": "baseline1",
+    "agent": 0
+  },
+  {
+    "id": 18,
+    "description": "Card Game stage=2 vs baseline1, agent_position=0, rep=18",
+    "stage": 2,
+    "baseline": "baseline1",
+    "agent": 0
+  },
+  {
+    "id": 19,
+    "description": "Card Game stage=2 vs baseline1, agent_position=0, rep=19",
+    "stage": 2,
+    "baseline": "baseline1",
+    "agent": 0
+  },
+  {
+    "id": 40,
+    "description": "Card Game stage=2 vs baseline1, agent_position=1, rep=15",
+    "stage": 2,
+    "baseline": "baseline1",
+    "agent": 1
+  },
+  {
+    "id": 41,
+    "description": "Card Game stage=2 vs baseline1, agent_position=1, rep=16",
+    "stage": 2,
+    "baseline": "baseline1",
+    "agent": 1
+  },
+  {
+    "id": 42,
+    "description": "Card Game stage=2 vs baseline1, agent_position=1, rep=17",
+    "stage": 2,
+    "baseline": "baseline1",
+    "agent": 1
+  },
+  {
+    "id": 43,
+    "description": "Card Game stage=2 vs baseline1, agent_position=1, rep=18",
+    "stage": 2,
+    "baseline": "baseline1",
+    "agent": 1
+  },
+  {
+    "id": 44,
+    "description": "Card Game stage=2 vs baseline1, agent_position=1, rep=19",
+    "stage": 2,
+    "baseline": "baseline1",
+    "agent": 1
+  },
+  {
+    "id": 65,
+    "description": "Card Game stage=2 vs baseline2, agent_position=0, rep=15",
+    "stage": 2,
+    "baseline": "baseline2",
+    "agent": 0
+  },
+  {
+    "id": 66,
+    "description": "Card Game stage=2 vs baseline2, agent_position=0, rep=16",
+    "stage": 2,
+    "baseline": "baseline2",
+    "agent": 0
+  },
+  {
+    "id": 67,
+    "description": "Card Game stage=2 vs baseline2, agent_position=0, rep=17",
+    "stage": 2,
+    "baseline": "baseline2",
+    "agent": 0
+  },
+  {
+    "id": 68,
+    "description": "Card Game stage=2 vs baseline2, agent_position=0, rep=18",
+    "stage": 2,
+    "baseline": "baseline2",
+    "agent": 0
+  },
+  {
+    "id": 69,
+    "description": "Card Game stage=2 vs baseline2, agent_position=0, rep=19",
+    "stage": 2,
+    "baseline": "baseline2",
+    "agent": 0
+  },
+  {
+    "id": 90,
+    "description": "Card Game stage=2 vs baseline2, agent_position=1, rep=15",
+    "stage": 2,
+    "baseline": "baseline2",
+    "agent": 1
+  },
+  {
+    "id": 91,
+    "description": "Card Game stage=2 vs baseline2, agent_position=1, rep=16",
+    "stage": 2,
+    "baseline": "baseline2",
+    "agent": 1
+  },
+  {
+    "id": 92,
+    "description": "Card Game stage=2 vs baseline2, agent_position=1, rep=17",
+    "stage": 2,
+    "baseline": "baseline2",
+    "agent": 1
+  },
+  {
+    "id": 93,
+    "description": "Card Game stage=2 vs baseline2, agent_position=1, rep=18",
+    "stage": 2,
+    "baseline": "baseline2",
+    "agent": 1
+  },
+  {
+    "id": 94,
+    "description": "Card Game stage=2 vs baseline2, agent_position=1, rep=19",
+    "stage": 2,
+    "baseline": "baseline2",
+    "agent": 1
+  }
+]
