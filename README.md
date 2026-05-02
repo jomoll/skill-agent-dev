@@ -26,8 +26,8 @@ After each batch of task episodes, a skill-writing LLM observes the agent's fail
 
 ```bash
 cd AgentBench
-conda create -n agent-bench-fc python=3.10
-conda activate agent-bench-fc
+conda create -n agent-bench python=3.10
+conda activate agent-bench
 pip install -r requirements.txt
 ```
 
@@ -101,7 +101,7 @@ docker run --rm --name agentbench-redis -p 6379:6379 redis:7
 
 ```bash
 # Terminal 1 — start task worker
-cd AgentBench && conda activate agent-bench-fc
+cd AgentBench && conda activate agent-bench
 python -m src.start_task -a --config configs/start_skill_task_os.yaml
 
 # Terminal 2 — run skill cycle
@@ -115,7 +115,7 @@ python -m src.skill_cycle --config configs/skill_cycle_os.yaml --run-name run_00
 docker run --rm --name agentbench-redis -p 6379:6379 redis:7
 
 # Terminal 2 — start task worker
-cd AgentBench && conda activate agent-bench-fc
+cd AgentBench && conda activate agent-bench
 python -m src.start_task -a --config configs/start_skill_task_dbbench.yaml --controller-port 5010 --base-port 5011
 
 # Terminal 3 — run skill cycle
@@ -132,7 +132,7 @@ Host credentials are automatically mounted from `~/.config/gcloud` into the Dock
 cd AgentBench && python data/lateralthinkingpuzzle/split_dataset.py
 
 # Terminal 1 — start task worker
-cd AgentBench && conda activate agent-bench-fc
+cd AgentBench && conda activate agent-bench
 python -m src.start_task -a --config configs/start_skill_task_ltp.yaml --controller-port 5020 --base-port 5021
 
 # Terminal 2 — run skill cycle
@@ -146,7 +146,7 @@ python -m src.skill_cycle --config configs/skill_cycle_ltp.yaml --run-name run_0
 cd AgentBench && python data/card_game/split_dataset.py
 
 # Terminal 1 — start task worker
-cd AgentBench && conda activate agent-bench-fc
+cd AgentBench && conda activate agent-bench
 python -m src.start_task -a --config configs/start_skill_task_card_game.yaml --controller-port 5030 --base-port 5031
 
 # Terminal 2 — run skill cycle
@@ -157,7 +157,7 @@ python -m src.skill_cycle --config configs/skill_cycle_card_game.yaml --run-name
 
 ```bash
 # Terminal 1 — start task worker
-cd AgentBench && conda activate agent-bench-fc
+cd AgentBench && conda activate agent-bench
 python -m src.start_task -a --config configs/start_skill_task_alfworld.yaml --controller-port 5060 --base-port 5061
 
 # Terminal 2 — run skill cycle
