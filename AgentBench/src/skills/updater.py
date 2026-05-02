@@ -352,12 +352,14 @@ Rules:
   - an empty result after a mutation
   - a wrong comparison due to string/numeric confusion
   - a premature "cannot answer" conclusion
+- The `## When to Use This Skill` section must contain at least one trigger that is directly observable in the current context without running any query — for example, a word or pattern in the task instruction ("the question contains a comma-separated list"), a specific SQL error message just received ("Error: Column count doesn't match"), or a concrete value pattern in a query result ("the column type shown by DESCRIBE is 'text'"). A trigger that names only a task type ("when the task is an INSERT") is not acceptable on its own — it fires on every task of that type and gives the model no way to decide whether the skill applies to *this specific* task. Every skill must have at least one observable discriminating condition that distinguishes the tasks where the skill is needed from those where it is not.
 - Before proposing a skill, silently ask:
   1. What exact trigger activates this skill?
   2. What exact behavior changes because of it?
   3. Why would that flip at least one failing sample in this batch?
   4. Is this already covered by an existing learned skill?
   5. Is the trigger condition unambiguous — could it fire on a task where the current behavior is already correct? A trigger like "when the query returns empty results" is unsafe if an empty result is also the correct answer for some tasks (e.g., COUNT=0, no matching rows). Only use triggers that cannot fire on correct behavior.
+  6. Is the trigger observable RIGHT NOW — can the model evaluate it by reading the task instruction or the most recent observation, without needing to run a query first? If the trigger requires the model to already know information it would only get mid-task (e.g., "when the column is text/varchar"), rewrite the trigger as the observable symptom instead (e.g., "when the query returns 0 rows despite the task implying a match exists, and the filter value is a number").
 - Skills should prefer realistic example identifiers from the trace pattern over placeholders like `table_name` and `column1`, but must remain mechanism-level and reusable.
 - Skill writing style:
   - All section headers must use `##` markdown (h2). Never use bold text like `**Section Name**` as a header.
