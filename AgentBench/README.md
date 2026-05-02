@@ -224,8 +224,94 @@ python -m src.assigner
 If you started the task server with the lite preset, you can also run the lite evaluation preset:
 
 ```bash
-python -m src.assigner --config configs/assignments/lite.yaml
+python -m src.start_task -a --config configs/start_skill_task_os.yaml
+python -m src.skill_cycle --config configs/skill_cycle_os.yaml --run-name run_001 --force
 ```
+
+The OS skill-cycle config is set to use `http://localhost:5040/api` as the controller.
+
+### Skill-cycle (ALFWorld) quick start
+
+Pull the ALFWorld Docker image first (requires network access):
+
+```bash
+docker pull longinyu/agentbench-alfworld
+```
+
+Start the task worker on `5060+` (avoids conflicts with OS and LTP workers):
+
+```bash
+python -m src.start_task -a --config configs/start_skill_task_alfworld.yaml --controller-port 5060 --base-port 5061
+```
+
+Then in a separate terminal run the skill-learning cycle:
+
+```bash
+python -m src.skill_cycle --config configs/skill_cycle_alfworld.yaml --run-name run_001 --force
+```
+
+The ALFWorld skill-cycle uses a stratified 60/40 split of `data/alfworld/standard.json` (30 dev + 20 val samples covering all 6 task types).
+
+### Skill base directories
+
+Each benchmark has its own skill base directory (`skills/<benchmark>/base/`) that is read-only during a run. The skill cycle writes learned skills to `<run_dir>/skills/learned/` instead — the base directory is never modified by training.
+
+All base directories ship with only a single `skeleton.md` file, which is a read-only template that defines the required structure for learned skills (it is never injected into the agent). The exception is:
+
+**DBBench Prompt Modifications**
+We have modified the original DBBench environment prompt (`src/server/tasks/dbbench/__init__.py`) to resolve contradictory formatting instructions. The original prompt instructed the agent to output lists for modification tasks while simultaneously stating the answer field could be "anything". This forced the skill-learning framework to waste cycles learning benchmark-specific formatting hacks rather than generalized SQL skills. The revised prompt enforces strict, deterministic formatting for all actions, maintaining the benchmark-agnostic goals of the skill agent.
+
+**OS Interaction** (`skills/os/base/`) additionally contains `task_type_classifier.md`, a manually authored base skill that fires on every OS task. OS tasks are uniquely ambiguous between two fundamentally different task types — *execute and report* (run commands, return the observed value) and *write a command/script* (output the command text as the answer). This ambiguity cannot be resolved by the skill-learning loop because it requires semantic task-level classification rather than a behavioural correction. Adding it as a permanent base skill ensures the agent classifies the task type before taking its first action on every episode. All other benchmarks are run with their base directories unchanged (skeleton only).
+
+### Skill-cycle (Mind2Web) quick start
+
+Pull the Mind2Web Docker image first (requires network access):
+
+```bash
+docker pull longinyu/agentbench-mind2web
+```
+
+Start the task worker on `5070+` (avoids conflicts with OS, LTP, Card Game, DBBench, and ALFWorld workers):
+
+```bash
+python -m src.start_task -a --config configs/start_skill_task_mind2web.yaml --controller-port 5070 --base-port 5071
+```
+
+**Note:** the Mind2Web image takes ~5 minutes to initialise. Wait until the terminal shows `... 200 OK` before continuing.
+
+Then in a separate terminal run the skill-learning cycle:
+
+```bash
+python -m src.skill_cycle --config configs/skill_cycle_mind2web.yaml --run-name run_001 --force
+```
+
+The Mind2Web skill-cycle uses a 60/40 split of the first 100 samples from the dev set (indices 0–59 for skill learning, 60–99 for validation). Success is measured by step success rate: the agent must select the correct DOM element **and** produce a perfect-F1 action string. Learned skills are written to `skills/mind2web/base/`.
+
+### Skill-cycle internals
+
+The skill cycle (`src/skill_cycle.py`) runs an iterative learning loop:
+
+1. **Run dev samples** in batches of `update_every`. After each batch, call `_grpo_skill_update`.
+2. **GRPO skill update**: generate `grpo_k` candidate skill proposals, probe each on `grpo_eval_n` samples (`grpo_eval_n/2` currently-failing + `grpo_eval_n/2` currently-passing), pick the proposal with the highest net score (fixes − regressions). Apply only if best net > 0.
+3. **Failure taxonomy**: before proposing, the agent classifies failing samples into named failure modes via `classify_failures`. This taxonomy is passed to `diagnose` → `propose` to give the proposer structured context. The taxonomy is accumulated across batches within the epoch and carried into the next epoch.
+4. **Validation**: run all val samples after each epoch; record val score.
+5. **Best-checkpoint management**: save `skills/learned/` → `skills/best/` whenever val improves. After training ends, restore `best/` as the final checkpoint. The best checkpoint is **not** restored before each epoch — training continues from the current state, and the best checkpoint is only applied at the very end.
+6. **NOT_AVAILABLE retry**: if the task server returns `NOT_AVAILABLE` (all worker slots full), `_run_single` retries indefinitely with up to 30 s between attempts. This is common under concurrent OS load (Docker container spin-up latency). The sample is never silently dropped as incorrect.
+
+#### Data splits
+
+Each benchmark ships with pre-computed splits produced by `data/<benchmark>/split_dataset.py`:
+
+| Benchmark | Dev (skill learning) | Val (monitoring) | Test (held-out) |
+|-----------|---------------------|-----------------|----------------|
+| OS        | 79 samples (60% of worlds 1–5, 7) | 56 samples | — |
+| DBBench   | 176 samples (60% of standard.jsonl, stratified by type) | 124 samples | 60 samples (dev.jsonl) |
+| ALFWorld  | 30 samples (6 task types × ~5) | 20 samples | 20 samples (dev.json) |
+| Mind2Web  | 60 samples (indices 0–59) | 40 samples (indices 60–99) | — |
+
+**ALFWorld split note**: samples are assigned IDs matching their position in the task's `data_files` list (JSON insertion order from `standard.json`). The split script iterates in insertion order — not alphabetical order — so IDs are consistent with what `AlfWorldTask.get_indices()` returns.
+
+**DBBench split note**: the dev set contains only real `standard.jsonl` entries. Synthetic aggregation samples (IDs ≥ 10000) were removed because they always fail with `START_FAILED` (the task server indexes by position in the dataset, and those IDs are out of bounds).
 
 ## Next Steps
 
@@ -287,3 +373,8 @@ Avalon task is merged from [AvalonBench](https://github.com/jonathanmli/Avalon-L
   journal = {arXiv preprint arXiv: 2308.03688}
 }
 ```
+
+## Local Benchmark Modifications (skill-agent-dev)
+
+* **DBBench**: Removed the arbitrary list format requirement for Type A/B classification to allow accurate skill learning.
+* **OS Interaction**: Checked against THUDM/AgentBench upstream upstream logic. Removed customized Type A/B/C classification bloat (execute-and-report, generate-artifact, static-knowledge) left over from development experiments so that it aligns closely with the original repository. This eliminates the 'Protocol Distraction' issue that prevented pure bash learning.
