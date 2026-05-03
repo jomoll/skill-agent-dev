@@ -25,10 +25,30 @@ Skills named "skeleton" (the read-only base template) are never injected.
 If no skills exist and the task is not DBBench, history is passed through unchanged.
 """
 
-from typing import Any, Dict, List
+import logging
+import re
+from typing import Any, Dict, FrozenSet, List
 
 from ..agent import AgentClient
 from src.skills.repository import SkillRepository
+
+logger = logging.getLogger(__name__)
+
+# Cap on injected skills per DBBench turn.  Keeps context noise low when the
+# learned repo is at max capacity.
+_MAX_DBBENCH_SKILLS = 3
+
+_INSERT_RE = re.compile(
+    r"\b(insert|was inserted|has been (added|inserted)"
+    r"|add(?:ing)? a (new )?(row|record|entry)"
+    r"|a new \w+(?: \w+)? (joined|hired|registered|added))\b",
+    re.IGNORECASE,
+)
+_UPDATE_RE = re.compile(
+    r"\b(update|was updated|has been (changed|updated|modified)"
+    r"|modif(?:y|ied|ying)|change the (value|record|entry|salary|name|status))\b",
+    re.IGNORECASE,
+)
 
 
 class SkillAwareAgent(AgentClient):
@@ -41,6 +61,9 @@ class SkillAwareAgent(AgentClient):
         skills = [s for s in self.skill_repo.load_all() if s["name"] != "skeleton"]
         first_content = self._message_content(history[0]) if history else ""
         is_dbbench = self._is_dbbench_prompt(first_content)
+
+        if is_dbbench:
+            skills = self._select_dbbench_skills(skills, first_content)
 
         if not skills and not is_dbbench:
             return self._delegate(history, tools=tools)
@@ -137,6 +160,61 @@ class SkillAwareAgent(AgentClient):
             desc_line = f"*When to use: {desc}*\n" if desc else ""
             blocks.append(f"### {name}\n{desc_line}\n{content}")
         return header + "\n\n".join(blocks)
+
+    @staticmethod
+    def _skill_scope(skill: Dict) -> FrozenSet[str]:
+        """Map a skill's tags to the query types it applies to.
+
+        A skill with no query-type tags is treated as general and matches all
+        types — it competes for a slot under the cap rather than being excluded.
+        """
+        tags = {t.lower() for t in (skill.get("tags") or [])}
+        scope: set = set()
+        if tags & {"insert"}:
+            scope.add("INSERT")
+        if tags & {"update", "delete"}:
+            scope.add("UPDATE")
+        if tags & {"mutation"}:
+            scope |= {"INSERT", "UPDATE"}
+        if tags & {"select", "retrieval", "read"}:
+            scope.add("READ")
+        return frozenset(scope) if scope else frozenset({"INSERT", "UPDATE", "READ"})
+
+    @classmethod
+    def _select_dbbench_skills(cls, skills: List[Dict], task_text: str) -> List[Dict]:
+        """Return at most _MAX_DBBENCH_SKILLS skills matched to the task's query type.
+
+        Query type is inferred from the initial task message.  Skills are ranked
+        by scope specificity: a skill that only covers INSERT ranks above one
+        that covers all three types, so narrow, targeted skills win slots first.
+        Skills whose scope does not include the inferred query type are dropped.
+        """
+        if _INSERT_RE.search(task_text):
+            query_type = "INSERT"
+        elif _UPDATE_RE.search(task_text):
+            query_type = "UPDATE"
+        else:
+            query_type = "READ"
+
+        ranked: List[tuple] = []
+        excluded: List[str] = []
+        for skill in skills:
+            scope = cls._skill_scope(skill)
+            if query_type in scope:
+                ranked.append((len(scope), skill))  # smaller scope → higher priority
+            else:
+                excluded.append(skill["name"])
+
+        ranked.sort(key=lambda x: x[0])
+        selected = [s for _, s in ranked[:_MAX_DBBENCH_SKILLS]]
+
+        logger.info(
+            "dbbench_skill_selection query_type=%s selected=%s excluded=%s",
+            query_type,
+            [s["name"] for s in selected],
+            excluded,
+        )
+        return selected
 
     @classmethod
     def _is_dbbench_prompt(cls, content: str) -> bool:
