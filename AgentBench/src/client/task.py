@@ -1,5 +1,6 @@
 import enum
 import inspect
+import time
 
 import requests
 
@@ -77,13 +78,19 @@ class TaskClient:
         return concurrency
 
     def run_sample(self, index: SampleIndex, agent: AgentClient) -> TaskClientOutput:
-        try:
-            result = requests.post(
-                self.controller_address + "/start_sample",
-                json=StartSampleRequest(name=self.name, index=index).dict(),
-            )
-        except Exception as e:
-            return TaskClientOutput(error=TaskError.NETWORK_ERROR.value, info=str(e))
+        result = None
+        for attempt in range(12):
+            try:
+                result = requests.post(
+                    self.controller_address + "/start_sample",
+                    json=StartSampleRequest(name=self.name, index=index).dict(),
+                )
+            except Exception as e:
+                return TaskClientOutput(error=TaskError.NETWORK_ERROR.value, info=str(e))
+            if result.status_code != 406:
+                break
+            if attempt < 11:
+                time.sleep(5)
         if result.status_code == 406:
             return TaskClientOutput(
                 error=TaskError.NOT_AVAILABLE.value, info=result.text

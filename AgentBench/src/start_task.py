@@ -40,6 +40,11 @@ def _start_worker(name, port, controller, definition):
                 "-v", f"{gcloud_dir}:/root/.config/gcloud:ro",
                 "-e", "GOOGLE_APPLICATION_CREDENTIALS=/root/.config/gcloud/application_default_credentials.json",
             ]
+        proxy_args = []
+        for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+                    "http_proxy", "https_proxy", "all_proxy", "no_proxy"):
+            if os.environ.get(key):
+                proxy_args.extend(["-e", key])
         log_f = _open_log(name, port)
         proc = subprocess.Popen(
             [
@@ -54,7 +59,7 @@ def _start_worker(name, port, controller, definition):
                 f"{project_root}:/root/workspace",
                 "-w",
                 "/root/workspace",
-            ] + gcloud_args + [
+            ] + gcloud_args + proxy_args + [
                 docker["image"],
                 "bash",
                 "-c",
