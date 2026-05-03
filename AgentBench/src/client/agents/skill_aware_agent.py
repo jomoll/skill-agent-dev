@@ -25,11 +25,9 @@ Skills named "skeleton" (the read-only base template) are never injected.
 If no skills exist and the task is not DBBench, history is passed through unchanged.
 
 Skill selection:
-  Each skill's tags are matched as whole words against the task instruction.
-  Skills with at least one matching tag are ranked by match count (more matches
-  first) and included up to _MAX_SKILLS.  Skills with tags that produce no match
-  are excluded.  Skills with no tags at all are treated as general-purpose and
-  fill remaining slots after tagged matches.
+  Skills are ranked against the current conversation context using tags,
+  descriptions, names, and the "When to Use" section. Tagged skills with no
+  direct tag hit are still eligible; they just rank below stronger matches.
 """
 
 import logging
@@ -44,6 +42,12 @@ logger = logging.getLogger(__name__)
 # Maximum skills injected per turn across all benchmarks.
 _MAX_SKILLS = 3
 
+_STOPWORDS = {
+    "a", "an", "and", "are", "as", "be", "by", "for", "from", "has", "have",
+    "i", "if", "in", "into", "is", "it", "me", "my", "of", "on", "or",
+    "the", "then", "this", "to", "use", "was", "when", "with", "you", "your",
+}
+
 
 class SkillAwareAgent(AgentClient):
     def __init__(self, agent: AgentClient, skill_repo: SkillRepository) -> None:
@@ -54,9 +58,10 @@ class SkillAwareAgent(AgentClient):
     def inference(self, history: List[dict], tools=None):
         skills = [s for s in self.skill_repo.load_all() if s["name"] != "skeleton"]
         first_content = self._message_content(history[0]) if history else ""
+        selection_context = self._selection_context(history)
         is_dbbench = self._is_dbbench_prompt(first_content)
 
-        skills = self._select_skills(skills, first_content)
+        skills = self._select_skills(skills, selection_context)
 
         if not skills and not is_dbbench:
             return self._delegate(history, tools=tools)
@@ -155,49 +160,88 @@ class SkillAwareAgent(AgentClient):
         return header + "\n\n".join(blocks)
 
     @classmethod
+    def _selection_context(cls, history: List[dict]) -> str:
+        """Build a compact text view of the task and recent observations."""
+        parts = []
+        for message in history:
+            content = cls._message_content(message)
+            if content:
+                parts.append(content)
+        return "\n".join(parts)[-12000:]
+
+    @staticmethod
+    def _tokens(text: str) -> set:
+        return {
+            token for token in re.findall(r"[a-z0-9]+", text.lower())
+            if len(token) > 2 and token not in _STOPWORDS
+        }
+
+    @staticmethod
+    def _tag_terms(tag: str) -> List[str]:
+        return [
+            part for part in re.split(r"[^a-z0-9]+", tag.lower())
+            if len(part) > 2 and part not in _STOPWORDS
+        ]
+
+    @staticmethod
+    def _when_to_use(content: str) -> str:
+        match = re.search(
+            r"(?is)##+\s*when to use(?: this skill)?\s*(.*?)(?=\n##+\s|\Z)",
+            content or "",
+        )
+        return match.group(1) if match else ""
+
+    @classmethod
     def _select_skills(cls, skills: List[Dict], task_text: str) -> List[Dict]:
-        """Return at most _MAX_SKILLS skills most relevant to the task instruction.
+        """Return at most _MAX_SKILLS skills ranked by relevance.
 
-        Each skill's tags are matched as whole words against the task text.
-        Skills are bucketed into three groups and concatenated in priority order:
-
-          1. Tagged + matching  — at least one tag found in the task text,
-                                  ranked by descending match count.
-          2. Untagged           — general-purpose skills with no tags declared,
-                                  included after tagged matches.
-          3. Tagged + no match  — excluded entirely.
-
-        The tag vocabulary is benchmark-agnostic: skill authors choose tags that
-        are words likely to appear in task instructions (e.g. "insert", "update",
-        "ranking", "heat", "navigate"), so no hardcoded mapping is needed here.
+        Tags get the strongest weight, but names, descriptions, and "When to Use"
+        text provide a fallback when older skills have technical tags such as
+        ``numeric_extraction`` that do not appear verbatim in user tasks.
         """
         task_lower = task_text.lower()
-        matched: List[tuple] = []
-        general: List[Dict] = []
-        excluded: List[str] = []
+        task_tokens = cls._tokens(task_text)
+        ranked: List[tuple] = []
 
-        for skill in skills:
+        for order, skill in enumerate(skills):
             tags = [t.lower() for t in (skill.get("tags") or [])]
-            if not tags:
-                general.append(skill)
-                continue
-            score = sum(
-                1 for tag in tags
-                if re.search(r"\b" + re.escape(tag) + r"\b", task_lower)
-            )
-            if score > 0:
-                matched.append((score, skill))
-            else:
-                excluded.append(skill["name"])
+            tag_score = 0
+            for tag in tags:
+                terms = cls._tag_terms(tag)
+                if not terms:
+                    continue
+                if re.search(r"\b" + re.escape(tag) + r"\b", task_lower):
+                    tag_score += 3
+                elif all(term in task_tokens for term in terms):
+                    tag_score += 2
+                else:
+                    tag_score += sum(1 for term in terms if term in task_tokens)
 
-        matched.sort(key=lambda x: -x[0])
-        ranked = [s for _, s in matched] + general
-        selected = ranked[:_MAX_SKILLS]
+            selector_text = " ".join(
+                [
+                    skill.get("name", "").replace("_", " "),
+                    skill.get("description", ""),
+                    cls._when_to_use(skill.get("content", "")),
+                ]
+            )
+            selector_tokens = cls._tokens(selector_text)
+            text_score = len(task_tokens & selector_tokens)
+            score = tag_score * 10 + text_score
+
+            # Untagged skills are intentionally general, but should not beat a
+            # concrete tagged match.  Give them a small stable floor.
+            if not tags:
+                score += 1
+
+            ranked.append((-score, order, skill))
+
+        ranked.sort(key=lambda x: (x[0], x[1]))
+        selected = [s for _, _, s in ranked[:_MAX_SKILLS]]
 
         logger.info(
-            "skill_selection selected=%s excluded=%s",
+            "skill_selection selected=%s scores=%s",
             [s["name"] for s in selected],
-            excluded,
+            {skill["name"]: -score for score, _, skill in ranked},
         )
         return selected
 

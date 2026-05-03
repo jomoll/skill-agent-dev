@@ -184,7 +184,7 @@ class OSInteraction(Task):
             index_prefix = item["index_prefix"]
             single_file_configs = self._load_configs(problem_file, item["script_dir"])
             for i, config in enumerate(single_file_configs):
-                key = f"{index_prefix}{i:05d}"
+                key = f"{index_prefix}{(i + 1):05d}"
                 self.problem_configs[key] = {
                     "file": problem_file,
                     "config": config,
