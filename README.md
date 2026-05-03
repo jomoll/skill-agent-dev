@@ -145,6 +145,11 @@ python -m src.skill_cycle --config configs/skill_cycle_ltp.yaml --run-name run_0
 
 ### Card Game
 
+The Card Game skill-cycle split is procedurally generated from `cg-std` with
+`test_time=40`: 80 dev samples, 60 val samples, and 20 held-out test samples.
+The current cycle config uses `update_every=40`, so each epoch has two serial
+dev batches.
+
 ```bash
 # Generate data splits (one-time)
 cd AgentBench && python data/card_game/split_dataset.py
@@ -201,7 +206,7 @@ python -m src.run_manual_skills --config configs/manual_skills_dbbench.yaml --sp
 | DBBench | 240 | 124 | 60 | 176 real (60/40 of standard.jsonl by query type) + 64 synthetic aggregation; dev.jsonl held out |
 | OS Interaction | 79 | 56 | 35 | 60/40 of worlds 1–5,7 stratified per world; world 6 + dev.json held out |
 | LTP | 30 | 20 | 20 | 60/40 of standard.xlsx; dev.xlsx held out (IDs offset by 50 to avoid collision) |
-| Card Game | 60 | 20 | 20 | 15/5/5 reps × 4 combos; procedurally generated (test_time=25) |
+| Card Game | 80 | 60 | 20 | 20/15/5 reps × 4 combos; procedurally generated (`cg-std.test_time=40`) |
 | ALFWorld | 26 | 24 | 20 | Stratified 60/40 of standard.json by task type; dev.json held out |
 
 ### DBBench synthetic extension

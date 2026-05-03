@@ -19,8 +19,8 @@ task:
 
 # Data splits produced by data/card_game/split_dataset.py
 data:
-  dev: "data/card_game/split_dev.json"   # 60 samples (15 reps × 4 combos) — skill learning
-  val: "data/card_game/split_val.json"   # 20 samples (5 reps × 4 combos) — monitoring
+  dev: "data/card_game/split_dev.json"   # 80 samples (20 reps × 4 combos) — skill learning
+  val: "data/card_game/split_val.json"   # 60 samples (15 reps × 4 combos) — monitoring
   # test: data/card_game/split_test.json  # 20 samples (5 reps × 4 combos, held-out)
 
 # Task-specific eval function
@@ -35,11 +35,11 @@ skills:
 # Card Game uses a single shared socket — concurrent samples would cross-wire sessions.
 cycle:
   epochs: 5
-  update_every: 60        # 1 batch per epoch (full epoch) over 60 dev samples
+  update_every: 40        # 2 batches per epoch (full epoch) over 80 dev samples
   batch_concurrency: 1   # shared socket serializes all games; concurrency > 1 breaks sessions
   max_proposals: 1       # one change per proposal call; best-of-K selects the winner
   max_learned_skills: 10
   grpo_k: 4              # candidate proposals sampled per update
-  grpo_eval_n: 30        # 50% of dev — larger probe now that dev tripled in size
+  grpo_eval_n: 40        # 50% of dev
   run_baseline: true     # run a silent val eval before epoch 0
   proposal_temperature: 0.8  # high temperature for diverse skill proposals (separate from agent temperature)

@@ -15,4 +15,4 @@ cg-dev:
 cg-std:
   parameters:
     name: "cg-std"
-    test_time: 5
+    test_time: 40

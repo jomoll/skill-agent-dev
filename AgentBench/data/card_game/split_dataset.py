@@ -3,12 +3,12 @@ Generate dev/val/test split metadata for the Card Game skill cycle.
 
 Card Game is procedurally generated — no external dataset. This script
 produces split JSON files whose IDs match the indices from CardGame.get_indices()
-when test_time=25 (100 total samples: 4 combos × 25 repetitions).
+when test_time=40 (160 total samples: 4 combos × 40 repetitions).
 
 Split strategy: within each (baseline, agent_position) combo group:
-  reps  0-14 → dev  (15 reps × 4 combos = 60 samples) — skill learning
-  reps 15-19 → val  ( 5 reps × 4 combos = 20 samples) — monitoring / early stopping
-  reps 20-24 → test ( 5 reps × 4 combos = 20 samples) — final evaluation
+  reps  0-19 → dev  (20 reps × 4 combos = 80 samples) — skill learning
+  reps 20-34 → val  (15 reps × 4 combos = 60 samples) — monitoring / early stopping
+  reps 35-39 → test ( 5 reps × 4 combos = 20 samples) — final evaluation
 
 Run from AgentBench/:
   python data/card_game/split_dataset.py
@@ -17,10 +17,10 @@ Run from AgentBench/:
 import json
 from pathlib import Path
 
-TEST_TIME = 25       # must match card-game-skill.parameters.test_time in card_game.yaml
-DEV_PER_GROUP = 15   # reps 0-14
-VAL_PER_GROUP = 5    # reps 15-19
-TEST_PER_GROUP = 5   # reps 20-24
+TEST_TIME = 40       # must match cg-std.parameters.test_time in configs/tasks/card_game.yaml
+DEV_PER_GROUP = 20   # reps 0-19
+VAL_PER_GROUP = 15   # reps 20-34
+TEST_PER_GROUP = 5   # reps 35-39
 
 
 def main():
