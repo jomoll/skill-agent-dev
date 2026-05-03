@@ -34,9 +34,8 @@ from src.skills.repository import SkillRepository
 
 logger = logging.getLogger(__name__)
 
-# Cap on injected skills per DBBench turn.  Keeps context noise low when the
-# learned repo is at max capacity.
-_MAX_DBBENCH_SKILLS = 3
+# Maximum skills injected per turn across all benchmarks.
+_MAX_SKILLS = 3
 
 _INSERT_RE = re.compile(
     r"\b(insert|was inserted|has been (added|inserted)"
@@ -62,8 +61,7 @@ class SkillAwareAgent(AgentClient):
         first_content = self._message_content(history[0]) if history else ""
         is_dbbench = self._is_dbbench_prompt(first_content)
 
-        if is_dbbench:
-            skills = self._select_dbbench_skills(skills, first_content)
+        skills = self._select_skills(skills, first_content, is_dbbench)
 
         if not skills and not is_dbbench:
             return self._delegate(history, tools=tools)
@@ -181,36 +179,45 @@ class SkillAwareAgent(AgentClient):
         return frozenset(scope) if scope else frozenset({"INSERT", "UPDATE", "READ"})
 
     @classmethod
-    def _select_dbbench_skills(cls, skills: List[Dict], task_text: str) -> List[Dict]:
-        """Return at most _MAX_DBBENCH_SKILLS skills matched to the task's query type.
+    def _select_skills(
+        cls, skills: List[Dict], task_text: str, is_dbbench: bool
+    ) -> List[Dict]:
+        """Return at most _MAX_SKILLS skills ranked by relevance to the current task.
 
-        Query type is inferred from the initial task message.  Skills are ranked
-        by scope specificity: a skill that only covers INSERT ranks above one
-        that covers all three types, so narrow, targeted skills win slots first.
-        Skills whose scope does not include the inferred query type are dropped.
+        For DBBench, query type is inferred from the task instruction and used to
+        exclude skills whose tags declare them for a different query type (e.g. an
+        INSERT skill is dropped on a read task).  For other benchmarks no query-type
+        inference is attempted, so only the cap and scope-specificity ranking apply.
+
+        Skills with narrower scope (fewer covered query types) rank higher, so a
+        targeted INSERT-only skill beats a general mutation skill beats an untagged
+        skill when all three are eligible.
         """
-        if _INSERT_RE.search(task_text):
-            query_type = "INSERT"
-        elif _UPDATE_RE.search(task_text):
-            query_type = "UPDATE"
+        if is_dbbench:
+            if _INSERT_RE.search(task_text):
+                query_type = "INSERT"
+            elif _UPDATE_RE.search(task_text):
+                query_type = "UPDATE"
+            else:
+                query_type = "READ"
         else:
-            query_type = "READ"
+            query_type = None
 
         ranked: List[tuple] = []
         excluded: List[str] = []
         for skill in skills:
             scope = cls._skill_scope(skill)
-            if query_type in scope:
+            if query_type is None or query_type in scope:
                 ranked.append((len(scope), skill))  # smaller scope → higher priority
             else:
                 excluded.append(skill["name"])
 
         ranked.sort(key=lambda x: x[0])
-        selected = [s for _, s in ranked[:_MAX_DBBENCH_SKILLS]]
+        selected = [s for _, s in ranked[:_MAX_SKILLS]]
 
         logger.info(
-            "dbbench_skill_selection query_type=%s selected=%s excluded=%s",
-            query_type,
+            "skill_selection query_type=%s selected=%s excluded=%s",
+            query_type or "none",
             [s["name"] for s in selected],
             excluded,
         )
