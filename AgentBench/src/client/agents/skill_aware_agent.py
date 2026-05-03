@@ -23,11 +23,18 @@ ignore the rest — no per-skill checklists.
 
 Skills named "skeleton" (the read-only base template) are never injected.
 If no skills exist and the task is not DBBench, history is passed through unchanged.
+
+Skill selection:
+  Each skill's tags are matched as whole words against the task instruction.
+  Skills with at least one matching tag are ranked by match count (more matches
+  first) and included up to _MAX_SKILLS.  Skills with tags that produce no match
+  are excluded.  Skills with no tags at all are treated as general-purpose and
+  fill remaining slots after tagged matches.
 """
 
 import logging
 import re
-from typing import Any, Dict, FrozenSet, List
+from typing import Any, Dict, List
 
 from ..agent import AgentClient
 from src.skills.repository import SkillRepository
@@ -36,18 +43,6 @@ logger = logging.getLogger(__name__)
 
 # Maximum skills injected per turn across all benchmarks.
 _MAX_SKILLS = 3
-
-_INSERT_RE = re.compile(
-    r"\b(insert|was inserted|has been (added|inserted)"
-    r"|add(?:ing)? a (new )?(row|record|entry)"
-    r"|a new \w+(?: \w+)? (joined|hired|registered|added))\b",
-    re.IGNORECASE,
-)
-_UPDATE_RE = re.compile(
-    r"\b(update|was updated|has been (changed|updated|modified)"
-    r"|modif(?:y|ied|ying)|change the (value|record|entry|salary|name|status))\b",
-    re.IGNORECASE,
-)
 
 
 class SkillAwareAgent(AgentClient):
@@ -61,7 +56,7 @@ class SkillAwareAgent(AgentClient):
         first_content = self._message_content(history[0]) if history else ""
         is_dbbench = self._is_dbbench_prompt(first_content)
 
-        skills = self._select_skills(skills, first_content, is_dbbench)
+        skills = self._select_skills(skills, first_content)
 
         if not skills and not is_dbbench:
             return self._delegate(history, tools=tools)
@@ -159,65 +154,48 @@ class SkillAwareAgent(AgentClient):
             blocks.append(f"### {name}\n{desc_line}\n{content}")
         return header + "\n\n".join(blocks)
 
-    @staticmethod
-    def _skill_scope(skill: Dict) -> FrozenSet[str]:
-        """Map a skill's tags to the query types it applies to.
-
-        A skill with no query-type tags is treated as general and matches all
-        types — it competes for a slot under the cap rather than being excluded.
-        """
-        tags = {t.lower() for t in (skill.get("tags") or [])}
-        scope: set = set()
-        if tags & {"insert"}:
-            scope.add("INSERT")
-        if tags & {"update", "delete"}:
-            scope.add("UPDATE")
-        if tags & {"mutation"}:
-            scope |= {"INSERT", "UPDATE"}
-        if tags & {"select", "retrieval", "read"}:
-            scope.add("READ")
-        return frozenset(scope) if scope else frozenset({"INSERT", "UPDATE", "READ"})
-
     @classmethod
-    def _select_skills(
-        cls, skills: List[Dict], task_text: str, is_dbbench: bool
-    ) -> List[Dict]:
-        """Return at most _MAX_SKILLS skills ranked by relevance to the current task.
+    def _select_skills(cls, skills: List[Dict], task_text: str) -> List[Dict]:
+        """Return at most _MAX_SKILLS skills most relevant to the task instruction.
 
-        For DBBench, query type is inferred from the task instruction and used to
-        exclude skills whose tags declare them for a different query type (e.g. an
-        INSERT skill is dropped on a read task).  For other benchmarks no query-type
-        inference is attempted, so only the cap and scope-specificity ranking apply.
+        Each skill's tags are matched as whole words against the task text.
+        Skills are bucketed into three groups and concatenated in priority order:
 
-        Skills with narrower scope (fewer covered query types) rank higher, so a
-        targeted INSERT-only skill beats a general mutation skill beats an untagged
-        skill when all three are eligible.
+          1. Tagged + matching  — at least one tag found in the task text,
+                                  ranked by descending match count.
+          2. Untagged           — general-purpose skills with no tags declared,
+                                  included after tagged matches.
+          3. Tagged + no match  — excluded entirely.
+
+        The tag vocabulary is benchmark-agnostic: skill authors choose tags that
+        are words likely to appear in task instructions (e.g. "insert", "update",
+        "ranking", "heat", "navigate"), so no hardcoded mapping is needed here.
         """
-        if is_dbbench:
-            if _INSERT_RE.search(task_text):
-                query_type = "INSERT"
-            elif _UPDATE_RE.search(task_text):
-                query_type = "UPDATE"
-            else:
-                query_type = "READ"
-        else:
-            query_type = None
-
-        ranked: List[tuple] = []
+        task_lower = task_text.lower()
+        matched: List[tuple] = []
+        general: List[Dict] = []
         excluded: List[str] = []
+
         for skill in skills:
-            scope = cls._skill_scope(skill)
-            if query_type is None or query_type in scope:
-                ranked.append((len(scope), skill))  # smaller scope → higher priority
+            tags = [t.lower() for t in (skill.get("tags") or [])]
+            if not tags:
+                general.append(skill)
+                continue
+            score = sum(
+                1 for tag in tags
+                if re.search(r"\b" + re.escape(tag) + r"\b", task_lower)
+            )
+            if score > 0:
+                matched.append((score, skill))
             else:
                 excluded.append(skill["name"])
 
-        ranked.sort(key=lambda x: x[0])
-        selected = [s for _, s in ranked[:_MAX_SKILLS]]
+        matched.sort(key=lambda x: -x[0])
+        ranked = [s for _, s in matched] + general
+        selected = ranked[:_MAX_SKILLS]
 
         logger.info(
-            "skill_selection query_type=%s selected=%s excluded=%s",
-            query_type or "none",
+            "skill_selection selected=%s excluded=%s",
             [s["name"] for s in selected],
             excluded,
         )

@@ -7,7 +7,7 @@ agent:
     project_id: "johannes-moll"
     location: "us-central1"
     model: "gemini-3.1-flash-lite-preview"
-    temperature: 0
+    temperature: 0.0
     max_output_tokens: 32768
 
 # Task worker (must be running before starting this script)

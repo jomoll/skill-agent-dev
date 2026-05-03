@@ -320,7 +320,7 @@ Return ONLY a JSON array of proposed edits:
     "name": "snake_case_skill_name",
     "description": "one-line description",
     "content": "markdown body for the skill",
-    "tags": ["<query-type tag(s)>", "<other tags>"]
+    "tags": ["<keyword from task instructions>", "<natural-language synonym if needed>"]
   }}
 ]
 
@@ -330,7 +330,7 @@ Rules:
 - Use MODIFY when an existing skill covers the right mechanism but has a missing trigger, wrong example, or incomplete action rule — fix the specific gap, do not rewrite the whole skill.
 - Use REMOVE when an existing skill is redundant (fully covered by another), too vague to change behavior, or is causing regressions visible in the log. A REMOVE + ADD pair is the correct way to replace a weak skill with a better one.
 - Never MODIFY or REMOVE read-only base skills such as "skeleton".
-- `tags` must include at least one query-type tag so the skill injector can route it to the right tasks. Use exactly these values: `insert` (INSERT tasks), `update` (UPDATE/DELETE tasks), `mutation` (any write task — use instead of listing both insert and update), `select` or `retrieval` (read-only SELECT tasks). A skill with no query-type tag is treated as general-purpose and competes for a limited injection slot, so omit the tag only if the skill genuinely applies to all query types.
+- `tags` must include the keywords that will appear in task instructions where this skill applies. The injector matches tag words against the task text at runtime, so tags must be words a task instruction would actually contain — for example `insert`, `update`, `ranking`, `aggregation`, `counting`, `navigate`, `heat`. Include both the technical term and common natural-language synonyms if tasks express the same operation differently (e.g. `insert` plus `hired`, `added`, `joined` for SQL INSERT tasks described in prose). A skill with no tags is treated as general-purpose and gets lower injection priority, so only omit tags if the skill genuinely applies to every task type.
 - Prefer reusable capability skills over narrow one-task recipes, but do not broaden a skill so much that it stops changing behavior.
 - One skill must target exactly one failure mechanism.
 - A good skill must change the agent's next action, query, parsing step, or verification behavior.
@@ -653,7 +653,7 @@ class SkillUpdater:
             f"Do NOT broaden the skill or remove its core mechanism.\n\n"
             f"Return ONLY a JSON array with the revised proposal:\n"
             f'[{{"action": "{action}", "name": "{name}", '
-            f'"description": "...", "content": "...", "tags": []}}]'
+            f'"description": "...", "content": "...", "tags": ["<keep or update to match narrowed trigger>"]}}]'
         )
 
         try:

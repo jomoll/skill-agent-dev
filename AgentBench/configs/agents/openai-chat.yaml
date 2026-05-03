@@ -5,7 +5,7 @@ parameters:
     Content-Type: application/json
     Authorization: Bearer <% PUT-YOUR-OPENAI-KEY-HERE %>
   body:
-    temperature: 0
+    temperature: 0.0
   prompter:
     name: role_content_dict
     args:
