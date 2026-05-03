@@ -97,10 +97,11 @@ class KnowledgeGraph(Task):
             for current_round in range(self.max_rounds):
                 response = session.sync_action()
 
-                tool_calls = response.messages[0].get('tool_calls') or []
+                messages = response.messages or []
+                tool_calls = messages[0].get('tool_calls') or [] if messages else []
                 if not tool_calls:
                     try:
-                        final_message = response.messages[0].get('content') or ''
+                        final_message = messages[0].get('content') or '' if messages else ''
                         final_message = final_message.split("Observation:")[0]
                         final_message = final_message.replace("\\_", "_")
                         final_answer = re.findall(r'(?:Find|Final) Answer: #(\d+)', final_message)

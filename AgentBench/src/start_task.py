@@ -1,8 +1,10 @@
 import argparse
+import datetime
 import os
 import signal
 import subprocess
 import time
+from pathlib import Path
 from urllib.parse import urlparse
 
 import requests
@@ -10,6 +12,19 @@ import requests
 from src.configs import ConfigLoader
 
 _procs = []  # all subprocesses started by this script
+_log_files = []  # open log file handles, closed on shutdown
+
+_LOG_DIR = Path(__file__).parent.parent.parent / "logs"  # skill-agent-dev/logs/
+
+
+def _open_log(name: str, port: int):
+    _LOG_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = _LOG_DIR / f"task_worker_{name}_{port}_{ts}.log"
+    f = open(path, "w", buffering=1, encoding="utf-8")
+    print(f"[start_task] worker log: {path}")
+    _log_files.append(f)
+    return f
 
 
 def _start_worker(name, port, controller, definition):
@@ -25,6 +40,7 @@ def _start_worker(name, port, controller, definition):
                 "-v", f"{gcloud_dir}:/root/.config/gcloud:ro",
                 "-e", "GOOGLE_APPLICATION_CREDENTIALS=/root/.config/gcloud/application_default_credentials.json",
             ]
+        log_f = _open_log(name, port)
         proc = subprocess.Popen(
             [
                 "docker",
@@ -46,9 +62,11 @@ def _start_worker(name, port, controller, definition):
                                             f" --self http://localhost:{port}/api"
                                             f" --port {port}"
                                             f" --controller {controller.replace('localhost', 'host.docker.internal')}",
-            ]
+            ],
+            stdout=log_f, stderr=log_f,
         )
     else:
+        log_f = _open_log(name, port)
         proc = subprocess.Popen(
             [
                 "python",
@@ -62,6 +80,7 @@ def _start_worker(name, port, controller, definition):
                 "--controller",
                 controller,
             ],
+            stdout=log_f, stderr=log_f,
         )
     _procs.append(proc)
 
@@ -70,6 +89,11 @@ def _shutdown(signum=None, frame=None):
     for proc in _procs:
         try:
             proc.terminate()
+        except Exception:
+            pass
+    for f in _log_files:
+        try:
+            f.close()
         except Exception:
             pass
     raise SystemExit(0)

@@ -452,13 +452,23 @@ class SkillCycleRunner:
     def run(self) -> None:
         log_path = self.run_dir / "run.log"
         log_file = open(log_path, "a", encoding="utf-8", buffering=1)
+
+        central_log_dir = self.run_dir.parent.parent.parent.parent / "logs"
+        central_log_dir.mkdir(parents=True, exist_ok=True)
+        central_log_path = central_log_dir / f"skill_cycle_{self.run_dir.parent.name}_{self.run_dir.name}.log"
+        central_log_file = open(central_log_path, "a", encoding="utf-8", buffering=1)
+
         original_stdout = sys.stdout
-        sys.stdout = _TeeStream(original_stdout, log_file)
+        original_stderr = sys.stderr
+        sys.stdout = _TeeStream(original_stdout, _TeeStream(log_file, central_log_file))
+        sys.stderr = _TeeStream(original_stderr, _TeeStream(log_file, central_log_file))
         try:
             self._run_inner()
         finally:
             sys.stdout = original_stdout
+            sys.stderr = original_stderr
             log_file.close()
+            central_log_file.close()
 
     def _run_inner(self) -> None:
         if self.run_baseline:
@@ -1292,21 +1302,27 @@ class SkillCycleRunner:
             is_correct = _score_result(sample, result, self._eval_fn)
             status = result.output.status if result.output else result.error
             task_result = result.output.result if result.output else None
-            return idx, is_correct, status, task_result
+            error_info = result.info if result.output is None else None
+            return idx, is_correct, status, task_result, error_info
 
         with ThreadPoolExecutor(max_workers=self.batch_concurrency) as pool:
             futures = {pool.submit(run_one, i, s): i
                        for i, s in enumerate(self.val_data)}
             for future in as_completed(futures):
-                idx, is_correct, status, task_result = future.result()
+                idx, is_correct, status, task_result, error_info = future.result()
                 val_entries[idx] = {"sample_id": self.val_data[idx]["id"],
                                     "is_correct": is_correct,
                                     "status": status,
-                                    "result": task_result}
+                                    "result": task_result,
+                                    "error_info": error_info}
                 if is_correct:
                     correct += 1
 
         score = correct / total if total > 0 else 0.0
+
+        with open(epoch_dir / "val_runs.jsonl", "w") as f:
+            for entry in val_entries:
+                f.write(json.dumps(entry) + "\n")
 
         val_score_record = {"epoch": epoch, "score": score,
                             "n_correct": correct, "n_total": total,

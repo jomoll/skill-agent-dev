@@ -120,7 +120,7 @@ class DBBenchTask(Task):
                 response = await session.action()
 
                 tool_calls = []
-                for message in response.messages:
+                for message in (response.messages or []):
                     tool_calls.extend(message.get('tool_calls', []) or [])
 
                 if not tool_calls:

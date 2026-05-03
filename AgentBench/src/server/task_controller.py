@@ -256,12 +256,8 @@ class TaskController:
         return result
 
     async def list_workers(self):
-        t = time.time()
         async with self.tasks_lock:
-            for task in self.tasks.values():
-                for worker in task.workers.values():
-                    if t - worker.last_visit > self.heart_rate:
-                        worker.status = WorkerStatus.COMA
+            self._mark_stale_workers_coma()
         return {name: task.dump() for name, task in self.tasks.items()}
 
     async def list_sessions(self):
@@ -269,12 +265,20 @@ class TaskController:
 
     async def receive_heartbeat(self, data: RegisterRequest):
         async with self.tasks_lock:
+            self._mark_stale_workers_coma()
             if data.name not in self.tasks:
                 self.tasks[data.name] = TaskData(indices=data.indices)
             elif data.indices != self.tasks[data.name].indices:
-                raise HTTPException(
-                    400, "Error: Task already exists with different indices"
+                alive = any(
+                    w.status == WorkerStatus.ALIVE
+                    for w in self.tasks[data.name].workers.values()
                 )
+                if alive:
+                    raise HTTPException(
+                        400, "Error: Task already exists with different indices"
+                    )
+                # No live workers, so the restarted task can replace stale indices.
+                self.tasks[data.name] = TaskData(indices=data.indices)
             for worker in self.tasks[data.name].workers.values():
                 if worker.address == data.address:
                     worker.last_visit = time.time()
@@ -293,6 +297,13 @@ class TaskController:
             if result is False:
                 raise HTTPException(400, "Error: Worker status abnormal")
             # result is None: worker alive but session locks contended — accept heartbeat
+
+    def _mark_stale_workers_coma(self):
+        t = time.time()
+        for task in self.tasks.values():
+            for worker in task.workers.values():
+                if t - worker.last_visit > self.heart_rate:
+                    worker.status = WorkerStatus.COMA
 
     async def start_sample(self, data: StartSampleRequest):
         print("starting")

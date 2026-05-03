@@ -150,7 +150,7 @@ class ALFWorld(Task):
             output = session.sync_action()
 
             tool_calls = []
-            for message in output.messages:
+            for message in (output.messages or []):
                 tool_calls.extend(message.get('tool_calls', []) or [])
 
             if not tool_calls:
