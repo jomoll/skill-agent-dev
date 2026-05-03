@@ -82,11 +82,18 @@ Download the reference solution file into `MedAgentBench/src/server/tasks/medage
 
 All benchmarks use separate controller ports and can run in parallel.
 
-Tasks that manage Docker containers internally (DBBench, OS Interaction, ALFWorld) require a Redis instance for container allocation. Start it before the task worker:
+Tasks that manage Docker containers internally (DBBench, OS Interaction) require a Redis instance for container allocation and a pre-created Docker network. Run these once before starting any task worker:
 
 ```bash
+# Redis (keep running in background)
 docker run --rm --name agentbench-redis -p 6379:6379 redis:7
+
+# Docker networks (one-time, survives reboots with --driver bridge)
+docker network create dbbench_default || true
+docker network create os_interaction_default || true
 ```
+
+> **Linux note**: The task worker requires Docker 20.10+ for `--add-host host.docker.internal:host-gateway` support. Verify with `docker --version`. Also ensure your user is in the `docker` group (`sudo usermod -aG docker $USER`, then re-login) so the task worker can manage containers without sudo.
 
 | Benchmark | Controller port | Worker base port |
 |---|---|---|
@@ -111,14 +118,11 @@ python -m src.skill_cycle --config configs/skill_cycle_os.yaml --run-name run_00
 ### DBBench
 
 ```bash
-# Terminal 1 — Redis (required for MySQL container allocation)
-docker run --rm --name agentbench-redis -p 6379:6379 redis:7
-
-# Terminal 2 — start task worker
+# Terminal 1 — start task worker (Redis and dbbench_default network must already be running)
 cd AgentBench && conda activate agent-bench
 python -m src.start_task -a --config configs/start_skill_task_dbbench.yaml --controller-port 5010 --base-port 5011
 
-# Terminal 3 — run skill cycle
+# Terminal 2 — run skill cycle
 python -m src.skill_cycle --config configs/skill_cycle_dbbench.yaml --run-name run_001
 ```
 
