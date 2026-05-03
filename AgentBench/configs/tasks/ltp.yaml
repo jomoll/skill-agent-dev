@@ -2,6 +2,7 @@ default:
   module: src.server.tasks.ltp.LateralThinkingPuzzle
   docker:
     image: longinyu/agentbench-ltp
+    command: python -m pip install --disable-pip-version-check --timeout 60 --retries 10 agentrl-worker;
   parameters:
     round: 25
     eval_yaml: "configs/agents/api_agents.yaml"

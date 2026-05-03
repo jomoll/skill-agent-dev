@@ -2,16 +2,17 @@ default:
   module: src.server.tasks.card_game.CardGame
   docker:
     image: longinyu/agentbench-card_game
+    command: python -m pip install --disable-pip-version-check --timeout 60 --retries 10 agentrl-worker;
   parameters:
     port: 12347
     workers: 10
 
 cg-dev:
   parameters:
-    name: "CardGame-dev"
+    name: "cg-dev"
     test_time: 3
 
 cg-std:
   parameters:
-    name: "CardGame-std"
+    name: "cg-std"
     test_time: 5

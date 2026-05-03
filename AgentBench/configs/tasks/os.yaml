@@ -56,10 +56,7 @@ default:
     env_driver: docker
     env_options:
       network_name: os_interaction_default
-      state_driver: redis
-      state_options:
-        connection:
-          host: 172.17.0.1
+      state_driver: local
 
 os-std:
   module: "src.server.tasks.os_interaction.OSInteraction"

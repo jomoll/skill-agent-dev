@@ -37,10 +37,7 @@ default:
     env_driver: docker
     env_options:
       network_name: dbbench_default
-      state_driver: redis
-      state_options:
-        connection:
-          host: localhost
+      state_driver: local
 
 dbbench-std:
   parameters:

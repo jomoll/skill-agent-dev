@@ -2,6 +2,7 @@ default:
   module: src.server.tasks.mind2web.Mind2Web
   docker:
     image: longinyu/agentbench-mind2web
+    command: python -m pip install --disable-pip-version-check --timeout 60 --retries 10 agentrl-worker;
   parameters:
     concurrency: 10
     data:
