@@ -152,14 +152,16 @@ class FHIRSkillCycleRunner:
             else None
         )
         
-        # NOTE: Hide background scores, skill proposals, and regression scores from CLI 
-        # by defaulting sys.stdout to log_file. 
+        # NOTE: Hide background scores, skill proposals, and regression scores from CLI
+        # by defaulting sys.stdout to log_file.
         # But we will temporarily swap it back during _update_skills trace generation!
         sys.stdout = log_file
+        sys.stderr = log_file
         try:
             self._run_inner()
         finally:
             sys.stdout = original_stdout
+            sys.stderr = original_stderr
             self._progress_stream = None
             log_file.close()
 
@@ -287,8 +289,23 @@ class FHIRSkillCycleRunner:
                 try:
                     self.updater.apply(candidate, fork)
                     probe_samples = [e["_sample"] for e in probe]
+                    print(
+                        f"  [ProposalRanking] evaluating {len(probe_samples)} "
+                        f"probe samples for {', '.join(p['name'] for p in candidate)}"
+                    )
                     probe_entries = self._run_samples(probe_samples, fork, update_cycle=update_cycle)
                     score = sum(e.get("is_correct", False) for e in probe_entries)
+                except Exception as e:
+                    print(f"  [ProposalRanking] candidate failed: {e}")
+                    event["groups"].append({
+                        "label": label,
+                        "candidate": [
+                            {k: v for k, v in p.items() if not k.startswith("_")}
+                            for p in candidate
+                        ],
+                        "error": str(e),
+                    })
+                    score = -1
                 finally:
                     fork.cleanup()
                 if score > best_score:
@@ -341,18 +358,70 @@ class FHIRSkillCycleRunner:
         return selected[:target]
 
     def _evaluate_split(self, samples: List[Dict], path: Path, update_cycle: int) -> float:
-        entries = self._run_samples(samples, self.skill_repo, update_cycle=update_cycle)
-        self._write_jsonl(path, entries)
+        print(f"[Eval] evaluating {len(samples)} samples -> {path}")
+        entries = self._run_samples(
+            samples,
+            self.skill_repo,
+            update_cycle=update_cycle,
+            append_path=path,
+        )
         if not entries:
             return 0.0
         return sum(e["is_correct"] for e in entries) / len(entries)
 
-    def _run_samples(self, samples: List[Dict], repo: SkillRepository, update_cycle: int) -> List[Dict]:
+    def _run_samples(
+        self,
+        samples: List[Dict],
+        repo: SkillRepository,
+        update_cycle: int,
+        append_path: Optional[Path] = None,
+    ) -> List[Dict]:
         results: List[Dict] = []
+        if append_path:
+            append_path.parent.mkdir(parents=True, exist_ok=True)
+            append_path.write_text("", encoding="utf-8")
         with ThreadPoolExecutor(max_workers=self.batch_concurrency) as executor:
-            futures = [executor.submit(self._run_one, sample, repo, update_cycle) for sample in samples]
+            futures = {
+                executor.submit(self._run_one, sample, repo, update_cycle): sample
+                for sample in samples
+            }
             for future in self._progress(as_completed(futures), total=len(futures), desc="FHIR samples"):
-                results.append(future.result())
+                sample = futures[future]
+                try:
+                    entry = future.result()
+                except Exception as e:
+                    print(
+                        f"[FHIRSkillCycle] sample runner failed for "
+                        f"{sample.get('question_id')}: {e}"
+                    )
+                    entry = {
+                        "sample_id": sample.get("question_id"),
+                        "instruction": sample.get("question"),
+                        "query_type": sample.get("template") or sample.get("main_table_name"),
+                        "is_correct": False,
+                        "update_cycle": update_cycle,
+                        "status": "runner_error",
+                        "error": str(e),
+                        "ground_truth": sample.get("true_answer"),
+                        "task_result": {},
+                        "agent_actions": [],
+                        "history": [],
+                        "failure_tags": [
+                            str(x)
+                            for x in [sample.get("template"), sample.get("main_table_name")]
+                            if x
+                        ],
+                        "skill_snapshot_before": repo.snapshot(),
+                        "_sample": sample,
+                    }
+                results.append(entry)
+                if append_path:
+                    with open(append_path, "a", encoding="utf-8") as f:
+                        f.write(json.dumps(self._json_safe(entry), default=str) + "\n")
+                    print(
+                        f"[RunSamples] {len(results)}/{len(samples)} complete "
+                        f"score={sum(bool(e.get('is_correct')) for e in results)}/{len(results)}"
+                    )
         results.sort(key=lambda e: str(e["sample_id"]))
         return results
 
