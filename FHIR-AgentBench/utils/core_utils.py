@@ -427,6 +427,7 @@ def _vertex_ai_complete(
     tools: Optional[list] = None,
     temperature: float = 0.0,
     max_tokens: int = 32000,
+    timeout: int = 20,
 ):
     """Direct Vertex AI call using google-auth — same approach as AgentBench VertexAgent."""
     import os
@@ -520,7 +521,7 @@ def _vertex_ai_complete(
         endpoint,
         json=body,
         headers={"Authorization": f"Bearer {credentials.token}", "Content-Type": "application/json"},
-        timeout=120,
+        timeout=timeout,
     )
     try:
         resp.raise_for_status()
@@ -561,7 +562,8 @@ def safe_llm_call(model, messages, tools=None, temperature=0.0, parallel_tool_ca
     """Safe LLM API call with context length validation and retry logic."""
 
     if model.startswith("vertex_ai/") and not base_url:
-        for attempt in range(max_retries):
+        vertex_max_retries = min(max_retries, 3)
+        for attempt in range(vertex_max_retries):
             try:
                 return _vertex_ai_complete(
                     model,
@@ -569,11 +571,12 @@ def safe_llm_call(model, messages, tools=None, temperature=0.0, parallel_tool_ca
                     tools=tools,
                     temperature=temperature,
                     max_tokens=max_tokens,
+                    timeout=20,
                 )
             except Exception as e:
                 if "400 Client Error" in str(e) or "Bad Request" in str(e):
                     return None, f"BadRequestError: {e}", None
-                if attempt < max_retries - 1:
+                if attempt < vertex_max_retries - 1:
                     time.sleep(5)
                 else:
                     return None, f"Max retries exceeded: {e}", None
