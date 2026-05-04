@@ -213,6 +213,12 @@ cd FHIR-AgentBench && conda activate fhir-agentbench
 python skill_cycle.py --config configs/skill_cycle.yaml --run-name run_001
 ```
 
+If a run is interrupted or killed, resume it from the last completed samples:
+
+```bash
+python skill_cycle.py --config configs/skill_cycle.yaml --run-name run_001 --resume
+```
+
 The default config uses `multi_turn_code_resource`, `openai/gpt-oss-120b`, the CSV at
 `final_dataset/questions_answers_sql_fhir.csv`, the CSV `train` split as dev (capped at 80 samples), and
 the CSV `valid` split as val (capped at 40 samples), with skill updates running every 20 samples. For local vLLM/LiteLLM-compatible models, set

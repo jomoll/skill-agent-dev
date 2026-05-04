@@ -4,8 +4,10 @@ import io
 import json
 import random
 import shutil
+import signal
 import sys
 import logging
+import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logging.getLogger("openai").setLevel(logging.WARNING)
@@ -140,6 +142,7 @@ class FHIRSkillCycleRunner:
             max_learned_skills=self.max_learned_skills,
         )
         self._progress_stream = None
+        self.resume = bool(config.get("_resume", False))
 
     def run(self) -> None:
         log_path = self.run_dir / "run.log"
@@ -157,13 +160,69 @@ class FHIRSkillCycleRunner:
         # But we will temporarily swap it back during _update_skills trace generation!
         sys.stdout = log_file
         sys.stderr = log_file
+        previous_handlers = {}
+
+        def log_signal(signum, frame):
+            print(f"\n[FHIRSkillCycle] terminated by signal {signum}", flush=True)
+            self._write_state("terminated", signal=signum)
+            raise SystemExit(128 + signum)
+
+        for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            try:
+                previous_handlers[signum] = signal.getsignal(signum)
+                signal.signal(signum, log_signal)
+            except (AttributeError, ValueError):
+                pass
+
         try:
+            self._write_state("started")
+            print("[FHIRSkillCycle] run started", flush=True)
             self._run_inner()
+            self._write_state("completed")
+            print("[FHIRSkillCycle] run completed", flush=True)
+        except SystemExit as e:
+            current_state = {}
+            try:
+                state_path = self.run_dir / "run_state.json"
+                if state_path.exists():
+                    current_state = json.loads(state_path.read_text(encoding="utf-8"))
+            except Exception:
+                current_state = {}
+            if current_state.get("phase") != "terminated":
+                self._write_state("system_exit", code=e.code)
+                print(f"[FHIRSkillCycle] system exit: {e.code}", flush=True)
+            log_file.flush()
+            raise
+        except BaseException:
+            self._write_state("failed")
+            print("[FHIRSkillCycle] run failed", flush=True)
+            traceback.print_exc(file=log_file)
+            log_file.flush()
+            raise
         finally:
+            for signum, handler in previous_handlers.items():
+                try:
+                    signal.signal(signum, handler)
+                except (AttributeError, ValueError):
+                    pass
             sys.stdout = original_stdout
             sys.stderr = original_stderr
             self._progress_stream = None
             log_file.close()
+
+    def _write_state(self, phase: str, **fields) -> None:
+        state = {
+            "phase": phase,
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+        state.update(fields)
+        try:
+            path = self.run_dir / "run_state.json"
+            tmp_path = path.with_suffix(".json.tmp")
+            tmp_path.write_text(json.dumps(state, indent=2, default=str), encoding="utf-8")
+            tmp_path.replace(path)
+        except Exception:
+            pass
 
     def _progress(self, iterable, *, total: Optional[int] = None, desc: str = "", leave: bool = False):
         if tqdm is None or self._progress_stream is None:
@@ -213,27 +272,49 @@ class FHIRSkillCycleRunner:
         print(f"[Epoch {epoch}] {len(dev)} dev samples, {len(batches)} batches")
 
         all_entries: List[Dict] = []
+        updates_path = epoch_dir / "skill_updates.json"
         updates: List[Dict] = []
+        if self.resume and updates_path.exists():
+            try:
+                updates = json.loads(updates_path.read_text(encoding="utf-8"))
+                for event in updates:
+                    prev_taxonomy.update(event.get("new_failure_labels", {}))
+            except Exception as e:
+                print(f"[Resume] could not load {updates_path}: {e}")
+                updates = []
+        completed_update_cycles = {
+            int(event.get("update_cycle"))
+            for event in updates
+            if event.get("update_cycle") is not None
+        }
         dev_runs_path = epoch_dir / "dev_runs.jsonl"
         for batch_id, batch in enumerate(self._progress(batches, total=len(batches), desc=f"Epoch {epoch} batches")):
             print(f"  Batch {batch_id}/{len(batches)-1}: {len(batch)} samples")
-            batch_entries = self._run_samples(batch, self.skill_repo, update_cycle=batch_id)
-            self._append_jsonl(dev_runs_path, batch_entries)
+            batch_entries = self._run_samples(
+                batch,
+                self.skill_repo,
+                update_cycle=batch_id,
+                append_path=dev_runs_path,
+            )
             all_entries.extend(batch_entries)
             print(f"  Batch score: {sum(e['is_correct'] for e in batch_entries)}/{len(batch_entries)}")
 
-            event = self._update_skills(
-                batch_entries=batch_entries,
-                all_entries=all_entries,
-                prev_results=prev_results,
-                prev_taxonomy=prev_taxonomy,
-                epoch=epoch,
-                update_cycle=batch_id,
-            )
-            if event:
-                updates.append(event)
-                prev_taxonomy.update(event.get("new_failure_labels", {}))
-            (epoch_dir / "skill_updates.json").write_text(json.dumps(updates, indent=2), encoding="utf-8")
+            if self.resume and batch_id in completed_update_cycles:
+                print(f"  [Resume] update_cycle={batch_id} already has skill update event; skipping update")
+            else:
+                event = self._update_skills(
+                    batch_entries=batch_entries,
+                    all_entries=all_entries,
+                    prev_results=prev_results,
+                    prev_taxonomy=prev_taxonomy,
+                    epoch=epoch,
+                    update_cycle=batch_id,
+                )
+                if event:
+                    updates.append(event)
+                    prev_taxonomy.update(event.get("new_failure_labels", {}))
+                    completed_update_cycles.add(batch_id)
+            updates_path.write_text(json.dumps(updates, indent=2), encoding="utf-8")
 
         return all_entries, prev_taxonomy
 
@@ -591,7 +672,10 @@ class FHIRSkillCycleRunner:
             groups.setdefault(str(key_fn(entry)), []).append(entry)
         per_type = max(1, n // len(groups))
         selected: List[Dict] = []
-        for group_items in groups.values():
+        group_items_list = list(groups.values())
+        if len(group_items_list) > n:
+            group_items_list = rng.sample(group_items_list, n)
+        for group_items in group_items_list:
             selected.extend(rng.sample(group_items, min(per_type, len(group_items))))
         remaining = n - len(selected)
         if remaining > 0:
@@ -681,23 +765,62 @@ class FHIRSkillCycleRunner:
         update_cycle: int,
         append_path: Optional[Path] = None,
     ) -> List[Dict]:
+        sample_by_id = {str(sample.get("question_id")): sample for sample in samples}
         results: List[Dict] = []
+        completed_ids = set()
         if append_path:
             append_path.parent.mkdir(parents=True, exist_ok=True)
-            append_path.write_text("", encoding="utf-8")
+            if self.resume and append_path.exists():
+                for entry in self._read_jsonl(append_path):
+                    sid = str(entry.get("sample_id"))
+                    if sid not in sample_by_id or sid in completed_ids:
+                        continue
+                    entry["_sample"] = sample_by_id[sid]
+                    results.append(entry)
+                    completed_ids.add(sid)
+                if completed_ids:
+                    print(
+                        f"[Resume] loaded {len(completed_ids)}/{len(samples)} "
+                        f"completed samples from {append_path}",
+                        flush=True,
+                    )
+            else:
+                append_path.touch(exist_ok=True)
+        pending_samples = [
+            sample
+            for sample in samples
+            if str(sample.get("question_id")) not in completed_ids
+        ]
+        print(
+            f"[RunSamples] starting {len(pending_samples)} pending / {len(samples)} total "
+            f"(update_cycle={update_cycle})",
+            flush=True,
+        )
+        self._write_state(
+            "run_samples",
+            update_cycle=update_cycle,
+            total=len(samples),
+            completed=len(results),
+            append_path=str(append_path) if append_path else None,
+        )
         with ThreadPoolExecutor(max_workers=self.batch_concurrency) as executor:
             futures = {
                 executor.submit(self._run_one, sample, repo, update_cycle): sample
-                for sample in samples
+                for sample in pending_samples
             }
             for future in self._progress(as_completed(futures), total=len(futures), desc="FHIR samples"):
                 sample = futures[future]
                 try:
                     entry = future.result()
-                except Exception as e:
+                except BaseException as e:
+                    error_trace = "".join(
+                        traceback.format_exception(type(e), e, e.__traceback__)
+                    )
                     print(
                         f"[FHIRSkillCycle] sample runner failed for "
-                        f"{sample.get('question_id')}: {e}"
+                        f"{sample.get('question_id')}: {type(e).__name__}: {e}\n"
+                        f"{error_trace}",
+                        flush=True,
                     )
                     entry = {
                         "sample_id": sample.get("question_id"),
@@ -706,7 +829,8 @@ class FHIRSkillCycleRunner:
                         "is_correct": False,
                         "update_cycle": update_cycle,
                         "status": "runner_error",
-                        "error": str(e),
+                        "error": f"{type(e).__name__}: {e}",
+                        "traceback": error_trace,
                         "ground_truth": sample.get("true_answer"),
                         "task_result": {},
                         "agent_actions": [],
@@ -723,11 +847,28 @@ class FHIRSkillCycleRunner:
                 if append_path:
                     with open(append_path, "a", encoding="utf-8") as f:
                         f.write(json.dumps(self._json_safe(entry), default=str) + "\n")
-                    print(
-                        f"[RunSamples] {len(results)}/{len(samples)} complete "
-                        f"score={sum(bool(e.get('is_correct')) for e in results)}/{len(results)}"
-                    )
+                self._write_state(
+                    "run_samples",
+                    update_cycle=update_cycle,
+                    total=len(samples),
+                    completed=len(results),
+                    correct=sum(bool(e.get("is_correct")) for e in results),
+                    append_path=str(append_path) if append_path else None,
+                )
         results.sort(key=lambda e: str(e["sample_id"]))
+        print(
+            f"[RunSamples] finished {len(results)} samples "
+            f"score={sum(bool(e.get('is_correct')) for e in results)}/{len(results)}",
+            flush=True,
+        )
+        self._write_state(
+            "run_samples_finished",
+            update_cycle=update_cycle,
+            total=len(samples),
+            completed=len(results),
+            correct=sum(bool(e.get("is_correct")) for e in results),
+            append_path=str(append_path) if append_path else None,
+        )
         return results
 
     def _run_one(self, sample: Dict, repo: SkillRepository, update_cycle: int) -> Dict:
@@ -775,6 +916,19 @@ class FHIRSkillCycleRunner:
     def _json_safe(entry: Dict) -> Dict:
         return {k: v for k, v in entry.items() if not k.startswith("_")}
 
+    @staticmethod
+    def _read_jsonl(path: Path) -> List[Dict]:
+        entries: List[Dict] = []
+        if not path.exists():
+            return entries
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass
+        return entries
+
     def _write_jsonl(self, path: Path, entries: List[Dict]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
@@ -793,6 +947,7 @@ def main() -> None:
     parser.add_argument("--config", "-c", default="configs/skill_cycle.yaml")
     parser.add_argument("--run-name", "-n", default=None)
     parser.add_argument("--force", "-f", action="store_true")
+    parser.add_argument("--resume", "-r", action="store_true")
     args = parser.parse_args()
 
     config_path = Path(args.config)
@@ -801,12 +956,18 @@ def main() -> None:
 
     run_name = args.run_name or datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir = Path(config.get("output_dir", "outputs/skill_cycle")) / run_name
+    if args.force and args.resume:
+        raise SystemExit("--force and --resume are mutually exclusive.")
     if run_dir.exists() and args.force:
         shutil.rmtree(run_dir)
-    elif run_dir.exists():
+    elif run_dir.exists() and not args.resume:
         raise SystemExit(f"Run directory already exists: {run_dir}. Use --force to overwrite.")
     run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "config.yaml").write_text(yaml.dump(config), encoding="utf-8")
+    config["_resume"] = bool(args.resume)
+    if args.resume and (run_dir / "config.yaml").exists():
+        print(f"Resuming run directory: {run_dir}")
+    else:
+        (run_dir / "config.yaml").write_text(yaml.dump(config), encoding="utf-8")
     print(f"Run directory: {run_dir}")
 
     FHIRSkillCycleRunner(config, run_dir).run()
