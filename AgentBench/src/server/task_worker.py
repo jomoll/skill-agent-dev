@@ -138,6 +138,7 @@ class TaskWorker:
                     detail="Sample concurrency limit reached: %d" % self.task.concurrency,
                 )
             session = Session(tools=getattr(self.task, "tools", None))
+            session.loop = asyncio.get_running_loop()
             print("session created")
             task_executor = self.task_start_sample_wrapper(
                 parameters.index, session, parameters.session_id
@@ -255,7 +256,12 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     conf = ConfigLoader().load_from(args.config)
-    asyncio_task = InstanceFactory.parse_obj(conf[args.name]).create()
+    factory = (
+        InstanceFactory.model_validate(conf[args.name])
+        if hasattr(InstanceFactory, "model_validate")
+        else InstanceFactory.parse_obj(conf[args.name])
+    )
+    asyncio_task = factory.create()
 
     app = FastAPI()
     router_ = APIRouter()

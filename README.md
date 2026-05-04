@@ -5,7 +5,8 @@ Self-improving LLM agent framework using a GRPO-inspired skill cycle. Agents lea
 ```
 emnlp26/
 ├── AgentBench/        # OS Interaction, DBBench, LTP, Card Game, ALFWorld skill cycles
-└── MedAgentBench/     # FHIR medical records skill cycle
+├── MedAgentBench/     # FHIR medical records skill cycle
+└── FHIR-AgentBench/   # Native FHIR-AgentBench skill cycle
 ```
 
 ## How it works
@@ -76,6 +77,19 @@ Wait until the console shows "Started Application in XXX seconds", then verify a
 
 Download the reference solution file into `MedAgentBench/src/server/tasks/medagentbench/refsol.py` from the [Stanford Box link](https://stanfordmedicine.box.com/s/fizv0unyjgkb1r3a83rfn5p3dc673uho).
 
+### 3. FHIR-AgentBench
+
+```bash
+cd FHIR-AgentBench
+conda create -n fhir-agentbench python=3.11
+conda activate fhir-agentbench
+pip install -r requirements.txt
+```
+
+Create `FHIR-AgentBench/config.yml` as described in that repo's README. The skill cycle
+uses the same Google Cloud Healthcare/FHIR credentials and LiteLLM model settings as
+the original `run_agent.py` workflow.
+
 ---
 
 ## Running the skill cycle
@@ -103,6 +117,7 @@ docker network create os_interaction_default || true
 | Card Game | 5030 | 5031 |
 | ALFWorld | 5060 | 5061 |
 | MedAgentBench | 5001 (default) | 5002 |
+| FHIR-AgentBench | none | none |
 
 ### OS Interaction
 
@@ -187,6 +202,23 @@ python -m src.start_task -a --config configs/start_task.yaml
 python -m src.skill_cycle --config configs/skill_cycle.yaml --run-name run_001
 ```
 
+### FHIR-AgentBench
+
+FHIR-AgentBench does not use the AgentBench task controller. Its skill cycle wraps
+the existing FHIR agents directly, injects learned markdown skills into each agent's
+system prompt, and scores samples with a cached per-sample answer judge.
+
+```bash
+cd FHIR-AgentBench && conda activate fhir-agentbench
+python skill_cycle.py --config configs/skill_cycle.yaml --run-name run_001
+```
+
+The default config uses `multi_turn_code_resource`, `openai/gpt-oss-120b`, the CSV at
+`final_dataset/questions_answers_sql_fhir.csv`, the CSV `train` split as dev (capped at 80 samples), and
+the CSV `valid` split as val (capped at 40 samples), with skill updates running every 20 samples. For local vLLM/LiteLLM-compatible models, set
+`agent.base_url`, `updater.base_url`, and `eval.base_url` in
+`FHIR-AgentBench/configs/skill_cycle.yaml`.
+
 ### Evaluating with a manual skill pack
 
 To run a fixed set of skills against a split (useful as an upper-bound reference):
@@ -208,6 +240,7 @@ python -m src.run_manual_skills --config configs/manual_skills_dbbench.yaml --sp
 | LTP | 30 | 20 | 20 | 60/40 of standard.xlsx; dev.xlsx held out (IDs offset by 50 to avoid collision) |
 | Card Game | 80 | 60 | 20 | 20/15/5 reps × 4 combos; procedurally generated (`cg-std.test_time=40`) |
 | ALFWorld | 26 | 24 | 20 | Stratified 60/40 of standard.json by task type; dev.json held out |
+| FHIR-AgentBench | configurable | configurable | original CSV test split | Defaults to capped train/valid rows from `questions_answers_sql_fhir.csv` |
 
 ### DBBench synthetic extension
 
@@ -243,6 +276,7 @@ Key config files:
 | `AgentBench/configs/skill_cycle_card_game.yaml` | Card Game skill cycle hyperparameters |
 | `AgentBench/configs/skill_cycle_alfworld.yaml` | ALFWorld skill cycle hyperparameters |
 | `MedAgentBench/configs/skill_cycle.yaml` | MedAgentBench skill cycle hyperparameters |
+| `FHIR-AgentBench/configs/skill_cycle.yaml` | FHIR-AgentBench native skill cycle hyperparameters |
 | `AgentBench/configs/agents/gemini-chat.yaml` | Vertex AI Gemini agent config |
 | `MedAgentBench/configs/agents/vertex-gemini.yaml` | Vertex AI Gemini agent config |
 
@@ -265,6 +299,9 @@ AgentBench/skills/
 
 MedAgentBench/skills/
 └── base/               # read-only MedAgentBench base skills
+
+FHIR-AgentBench/skills/
+└── base/               # read-only FHIR-AgentBench skill template
 ```
 
 Learned skills are written to `outputs/<run>/skills/learned/` during training and loaded fresh on every inference call.

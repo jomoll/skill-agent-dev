@@ -7,7 +7,7 @@
 #   python -m src.skill_cycle --config configs/skill_cycle_alfworld.yaml --run-name run_001
 
 definition:
-  import: tasks/task_assembly.yaml
+  import: tasks/alfworld.yaml
 
 start:
-  alfworld-std: 1
+  alfworld-skill: 1

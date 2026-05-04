@@ -67,6 +67,7 @@ class Session:
     def __init__(self, tools: Union[List[Dict[str, Any]], None] = None) -> None:
         self.history: List[ChatHistoryItem] = []
         self.controller = SessionController(tools=tools)
+        self.loop: Union[asyncio.AbstractEventLoop, None] = None
 
     def inject(self, item):
         if not item:
@@ -85,6 +86,13 @@ class Session:
 
     def clear(self):
         self.history = []
+
+    def sync_action(self, *injection) -> AgentOutput:
+        if self.loop is not None:
+            return asyncio.run_coroutine_threadsafe(
+                self.action(*injection), self.loop
+            ).result()
+        return asyncio.run(self.action(*injection))
 
     @staticmethod
     def _calc_segments(msg: str):

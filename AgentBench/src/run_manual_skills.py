@@ -23,6 +23,11 @@ from src.skills.cycle import _load_eval_fn, _load_required_json_list, _score_res
 from src.skills.repository import SkillRepository
 from src.typings.general import InstanceFactory
 
+try:
+    from tqdm import tqdm
+except Exception:  # pragma: no cover - optional dependency
+    tqdm = None
+
 
 def _serialize_history(history):
     if not history:
@@ -117,9 +122,21 @@ def main():
     print(f"Manual skills:   {config['skills']['manual_dir']}")
     print(f"Concurrency:     {batch_concurrency}")
 
+    progress_stream = sys.stderr if tqdm is not None and sys.stderr.isatty() else None
+    completed = as_completed
+    if progress_stream is not None:
+        def completed(futures):
+            return tqdm(
+                as_completed(futures),
+                total=len(futures),
+                desc=f"{args.split} samples",
+                file=progress_stream,
+                dynamic_ncols=True,
+            )
+
     with ThreadPoolExecutor(max_workers=batch_concurrency) as pool:
         futures = {pool.submit(_run_one, sample, task_client, agent, eval_fn): i for i, sample in enumerate(samples)}
-        for idx, future in enumerate(as_completed(futures), start=1):
+        for idx, future in enumerate(completed(futures), start=1):
             sample_index = futures[future]
             entry = future.result()
             results[sample_index] = entry

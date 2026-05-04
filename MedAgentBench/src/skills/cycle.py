@@ -38,6 +38,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+try:
+    from tqdm import tqdm
+except Exception:  # pragma: no cover - optional dependency
+    tqdm = None
+
 from src.client.agents.skill_aware_agent import SkillAwareAgent
 from src.client.task import TaskClient
 from src.skills.repository import SkillRepository
@@ -397,6 +402,7 @@ class SkillCycleRunner:
         self._best_val_score: float = 0.0
         self._best_checkpoint_label: Any = None
         self._best_skills_dir: Path = self.run_dir / "skills" / "best"
+        self._progress_stream = None
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -406,12 +412,35 @@ class SkillCycleRunner:
         log_path = self.run_dir / "run.log"
         log_file = open(log_path, "a", encoding="utf-8", buffering=1)
         original_stdout = sys.stdout
+        original_stderr = sys.stderr
+        self._progress_stream = (
+            original_stderr
+            if tqdm is not None and getattr(original_stderr, "isatty", lambda: False)()
+            else None
+        )
         sys.stdout = _TeeStream(original_stdout, log_file)
         try:
             self._run_inner()
         finally:
             sys.stdout = original_stdout
+            self._progress_stream = None
             log_file.close()
+
+    def _progress(self, iterable, *, total: Optional[int] = None,
+                  desc: str = "", leave: bool = False, position: Optional[int] = None):
+        """Return a terminal-only tqdm wrapper, disabled for logs/nohup."""
+        if tqdm is None or self._progress_stream is None:
+            return iterable
+        kwargs = {
+            "total": total,
+            "desc": desc,
+            "leave": leave,
+            "file": self._progress_stream,
+            "dynamic_ncols": True,
+        }
+        if position is not None:
+            kwargs["position"] = position
+        return tqdm(iterable, **kwargs)
 
     def _run_inner(self) -> None:
         if self.run_baseline:
@@ -488,7 +517,14 @@ class SkillCycleRunner:
         print(f"[Epoch {epoch}] {len(dev)} dev samples — "
               f"{len(batches)} batches of ≤{self.update_every}")
 
-        for batch_idx, batch in enumerate(batches):
+        batch_iter = self._progress(
+            enumerate(batches),
+            total=len(batches),
+            desc=f"Epoch {epoch} batches",
+            leave=True,
+            position=0,
+        )
+        for batch_idx, batch in batch_iter:
             print(f"\n  Batch {batch_idx} / {len(batches) - 1} "
                   f"(update_cycle={update_cycle}, {len(batch)} samples)")
 
@@ -784,7 +820,14 @@ class SkillCycleRunner:
         best_stats = (0, 0, 0)
         best_regressed_traces: List[Dict] = []
 
-        for proposal in unique_candidates:
+        proposal_iter = self._progress(
+            unique_candidates,
+            total=len(unique_candidates),
+            desc="Proposal candidates",
+            leave=False,
+            position=1,
+        )
+        for proposal in proposal_iter:
             try:
                 raw_score, fixes, regressions, invalid_regr, regressed_traces = \
                     self._eval_candidate(proposal, probe_set, probe_failing_ids)
@@ -920,7 +963,13 @@ class SkillCycleRunner:
 
             with ThreadPoolExecutor(max_workers=self.batch_concurrency) as pool:
                 futures = {pool.submit(run_probe, s): s for s in probe_set}
-                for future in as_completed(futures):
+                for future in self._progress(
+                    as_completed(futures),
+                    total=len(futures),
+                    desc=f"Probe {proposal.get('action')}::{proposal.get('name')}",
+                    leave=False,
+                    position=2,
+                ):
                     sample = futures[future]
                     probe_result = future.result()
                     if probe_result is None:
@@ -974,7 +1023,13 @@ class SkillCycleRunner:
 
         with ThreadPoolExecutor(max_workers=self.batch_concurrency) as pool:
             futures = {pool.submit(run_one, s): s for s in probe_set}
-            for future in as_completed(futures):
+            for future in self._progress(
+                as_completed(futures),
+                total=len(futures),
+                desc="Baseline probe",
+                leave=False,
+                position=2,
+            ):
                 sample = futures[future]
                 is_correct = future.result()
                 if is_correct is None:
@@ -1194,7 +1249,13 @@ class SkillCycleRunner:
 
         with ThreadPoolExecutor(max_workers=self.batch_concurrency) as pool:
             futures = {pool.submit(run_one, i, s): i for i, s in enumerate(batch)}
-            for future in as_completed(futures):
+            for future in self._progress(
+                as_completed(futures),
+                total=len(futures),
+                desc=f"Dev batch {update_cycle}",
+                leave=False,
+                position=1,
+            ):
                 idx, (result, is_correct, post_verifications) = future.result()
                 entries[idx] = _make_log_entry(
                     batch[idx], result, is_correct, update_cycle, skill_snapshot,
@@ -1253,7 +1314,13 @@ class SkillCycleRunner:
         with ThreadPoolExecutor(max_workers=self.batch_concurrency) as pool:
             futures = {pool.submit(run_one, i, s): i
                        for i, s in enumerate(self.val_data)}
-            for future in as_completed(futures):
+            for future in self._progress(
+                as_completed(futures),
+                total=len(futures),
+                desc=f"Val {epoch}",
+                leave=False,
+                position=1,
+            ):
                 idx, is_correct = future.result()
                 val_entries[idx] = {"sample_id": self.val_data[idx]["id"],
                                     "is_correct": is_correct}

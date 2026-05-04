@@ -144,7 +144,7 @@ class VertexAgent(AgentClient):
 
                 if resp.status_code == 429:
                     # Rate limit - use exponential backoff with jitter
-                    delay = min(base_delay * (2 ** attempt), 120)  # Cap at 2 minutes
+                    delay = min(base_delay * (2 ** attempt), 60)  # Cap at 1 minute
                     jitter = delay * 0.2 * (0.5 - time.time() % 1)  # Add some randomness
                     wait_time = delay + jitter
                     print(f"Rate limited (attempt {attempt + 1}/{max_retries}), waiting {wait_time:.1f}s...")
