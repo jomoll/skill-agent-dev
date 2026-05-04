@@ -219,6 +219,12 @@ the CSV `valid` split as val (capped at 40 samples), with skill updates running 
 `agent.base_url`, `updater.base_url`, and `eval.base_url` in
 `FHIR-AgentBench/configs/skill_cycle.yaml`.
 
+FHIR-AgentBench uses the same grouped proposal-ranking shape as AgentBench and
+MedAgentBench: `cycle.grpo_k` is the total number of proposal calls per update,
+cycled over the largest failure modes, and each validated proposal is ranked on
+the same probe set against current-skill baseline fixes/regressions before a
+single winner is applied.
+
 ### Evaluating with a manual skill pack
 
 To run a fixed set of skills against a split (useful as an upper-bound reference):

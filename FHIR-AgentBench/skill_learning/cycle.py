@@ -255,107 +255,412 @@ class FHIRSkillCycleRunner:
         sample_to_label, new_labels = self.updater.classify_failures(failing, prev_taxonomy)
         diagnosis = self.updater.diagnose(failing, self.skill_repo, failure_labels=sample_to_label)
         effectiveness = _compute_skill_effectiveness(all_entries, prev_results)
-        groups: Dict[str, List[Dict]] = {}
-        for entry in failing:
-            groups.setdefault(sample_to_label.get(str(entry["sample_id"]), "unclassified_failure"), []).append(entry)
 
-        applied_all = []
-        event = {"epoch": epoch, "update_cycle": update_cycle, "groups": [], "new_failure_labels": new_labels}
-        for label, group_entries in groups.items():
-            proposals = []
-            for _ in range(self.grpo_k):
-                raw = self.updater.propose(
-                    group_entries,
-                    self.skill_repo,
-                    prev_results=prev_results,
-                    skill_effectiveness=effectiveness,
-                    failure_mode=label,
-                    diagnosis=diagnosis,
-                )
-                valid = self.updater.validate(raw, self.skill_repo)
-                if valid:
-                    proposals.append(valid)
+        event = {
+            "epoch": epoch,
+            "update_cycle": update_cycle,
+            "new_failure_labels": new_labels,
+            "applied": [],
+            "raw_proposals": [],
+            "grpo": [],
+        }
 
-            if not proposals:
-                event["groups"].append({"label": label, "applied": [], "reason": "no_valid_proposals"})
-                continue
+        proposal_groups = self._group_entries_by_failure_mode(batch_entries, sample_to_label)
+        print(
+            "  [ProposalRanking] failure groups: "
+            + ", ".join(f"{label}({len(entries)})" for label, entries in proposal_groups)
+        )
 
-            probe = self._build_probe(group_entries, all_entries)
-            baseline_score = sum(e.get("is_correct", False) for e in probe)
-            best = None
-            best_score = baseline_score
-            for candidate in proposals:
-                fork = self.skill_repo.fork()
-                try:
-                    self.updater.apply(candidate, fork)
-                    probe_samples = [e["_sample"] for e in probe]
-                    print(
-                        f"  [ProposalRanking] evaluating {len(probe_samples)} "
-                        f"probe samples for {', '.join(p['name'] for p in candidate)}"
-                    )
-                    probe_entries = self._run_samples(probe_samples, fork, update_cycle=update_cycle)
-                    score = sum(e.get("is_correct", False) for e in probe_entries)
-                except Exception as e:
-                    print(f"  [ProposalRanking] candidate failed: {e}")
-                    event["groups"].append({
+        candidates = []
+        raw_proposals = []
+        for k in range(self.grpo_k):
+            label, group_entries = proposal_groups[k % len(proposal_groups)]
+            group_ids = {
+                str(e.get("sample_id", ""))
+                for e in group_entries
+                if not e.get("is_correct", False)
+            }
+            group_diagnosis = {
+                sid: d for sid, d in diagnosis.items() if sid in group_ids
+            }
+            other_failing = [
+                dict(e, _failure_label=sample_to_label.get(str(e.get("sample_id", "")), "unknown"))
+                for e in failing
+                if str(e.get("sample_id", "")) not in group_ids
+            ]
+            raw = self.updater.propose(
+                group_entries,
+                self.skill_repo,
+                prev_results=prev_results,
+                skill_effectiveness=effectiveness,
+                failure_mode=label,
+                diagnosis=group_diagnosis or None,
+                other_failing=other_failing or None,
+            )
+            raw_proposals.extend(raw)
+            valid = self.updater.validate(raw, self.skill_repo)
+            if valid:
+                for proposal in valid:
+                    candidates.append({
                         "label": label,
-                        "candidate": [
-                            {k: v for k, v in p.items() if not k.startswith("_")}
-                            for p in candidate
-                        ],
-                        "error": str(e),
+                        "group_entries": group_entries,
+                        "proposal": proposal,
                     })
-                    score = -1
-                finally:
-                    fork.cleanup()
-                if score > best_score:
-                    best = candidate
-                    best_score = score
 
-            if best is None:
-                event["groups"].append({
-                    "label": label,
-                    "baseline_score": baseline_score,
-                    "best_score": best_score,
-                    "applied": [],
-                })
+        unique_candidates = []
+        seen = set()
+        for candidate in candidates:
+            proposal = candidate["proposal"]
+            key = (
+                proposal["action"],
+                proposal["name"],
+                proposal.get("content", "")[:100],
+            )
+            if key in seen:
                 continue
+            seen.add(key)
+            unique_candidates.append(candidate)
 
-            for proposal in best:
-                proposal["_provenance"] = {
-                    "epoch": epoch,
-                    "update_cycle": update_cycle,
-                    "failure_mode": label,
-                    "probe_score": best_score - baseline_score,
-                    "fixes": best_score,
-                    "regressions": max(0, baseline_score - best_score),
-                }
-            applied = self.updater.apply(best, self.skill_repo)
-            applied_all.extend(applied)
-            event["groups"].append({
-                "label": label,
-                "baseline_score": baseline_score,
-                "best_score": best_score,
-                "applied": applied,
+        print(
+            f"  [ProposalRanking] {len(candidates)} proposals sampled, "
+            f"{len(unique_candidates)} unique"
+        )
+        if not unique_candidates:
+            event["raw_proposals"] = raw_proposals
+            event["reason"] = "no_valid_proposals"
+            return event
+
+        rng = random.Random(epoch * 1000 + update_cycle)
+        probe, probe_failing_ids = self._build_probe_set(
+            all_entries=all_entries,
+            prev_results=prev_results,
+            epoch=epoch,
+            update_cycle=update_cycle,
+            rng=rng,
+        )
+        if not probe:
+            print("  [ProposalRanking] skipping update: no probe data")
+            event["raw_proposals"] = raw_proposals
+            event["reason"] = "no_probe_data"
+            return event
+        n_failing = sum(1 for e in probe if str(e["sample_id"]) in probe_failing_ids)
+        n_passing = len(probe) - n_failing
+        print(
+            f"  [ProposalRanking] probe set: {n_failing} failing + "
+            f"{n_passing} passing = {len(probe)} samples"
+        )
+        baseline_entries = self._run_samples(
+            [e["_sample"] for e in probe],
+            self.skill_repo,
+            update_cycle=update_cycle,
+        )
+        baseline_fixes, baseline_regressions = self._count_probe_transitions(
+            baseline_entries, probe_failing_ids
+        )
+        print(
+            f"  [ProposalRanking] baseline probe: "
+            f"{baseline_fixes} fixes, {baseline_regressions} regressions "
+            f"(current skills, no proposal)"
+        )
+
+        best = None
+        best_label = None
+        best_group_entries: List[Dict] = []
+        best_adjusted = 0
+        best_stats = (0, 0)
+        best_regressed_traces: List[Dict] = []
+        candidate_logs = []
+        for candidate_info in unique_candidates:
+            label = candidate_info["label"]
+            candidate = candidate_info["proposal"]
+            try:
+                print(
+                    f"  [ProposalRanking] evaluating {len(probe)} "
+                    f"probe samples for {candidate['action']}::{candidate['name']}"
+                )
+                raw_score, fixes, regressions, regressed_traces = self._eval_candidate(
+                    candidate,
+                    probe,
+                    probe_failing_ids,
+                    update_cycle,
+                )
+                adjusted = (
+                    (fixes - baseline_fixes)
+                    - (regressions - baseline_regressions)
+                )
+            except Exception as e:
+                print(f"  [ProposalRanking] candidate failed: {e}")
+                fixes = regressions = 0
+                regressed_traces = []
+                raw_score = adjusted = -1
+
+            print(
+                f"  [ProposalRanking] {candidate['action']}::{candidate['name']} -> "
+                f"adjusted={adjusted:+d} raw={raw_score:+d} "
+                f"(fixes={fixes} baseline_fixes={baseline_fixes}, "
+                f"regressions={regressions} "
+                f"baseline_regressions={baseline_regressions})"
+            )
+            candidate_logs.append({
+                "failure_mode": label,
+                "proposal": {k: v for k, v in candidate.items() if not k.startswith("_")},
+                "net": adjusted,
+                "score": adjusted,
+                "raw_score": raw_score,
+                "fixes": fixes,
+                "regressions": regressions,
+                "baseline_fixes": baseline_fixes,
+                "baseline_regressions": baseline_regressions,
             })
-            print(f"  [SkillUpdate] {label}: applied {len(applied)} edit(s), probe {baseline_score}->{best_score}")
+            if adjusted > best_adjusted:
+                best = candidate
+                best_label = label
+                best_group_entries = candidate_info["group_entries"]
+                best_adjusted = adjusted
+                best_stats = (fixes, regressions)
+                best_regressed_traces = regressed_traces
 
-        event["applied"] = applied_all
+        if best is None:
+            print("  [ProposalRanking] no proposal improved adjusted score — applying nothing")
+            event["raw_proposals"] = raw_proposals
+            event["grpo"] = candidate_logs
+            event["baseline_fixes"] = baseline_fixes
+            event["baseline_regressions"] = baseline_regressions
+            return event
+
+        if best_regressed_traces:
+            print(
+                f"  [ContrastiveRevision] {len(best_regressed_traces)} regression(s) — "
+                f"requesting targeted revision..."
+            )
+            raw_revisions = self.updater.revise(best, best_regressed_traces, self.skill_repo)
+            revisions = self.updater.validate(raw_revisions, self.skill_repo)
+            if revisions:
+                revision = revisions[0]
+                try:
+                    raw_score, fixes, regressions, _ = self._eval_candidate(
+                        revision,
+                        probe,
+                        probe_failing_ids,
+                        update_cycle,
+                    )
+                    adjusted = (
+                        (fixes - baseline_fixes)
+                        - (regressions - baseline_regressions)
+                    )
+                    print(
+                        f"  [ContrastiveRevision] {revision['action']}::{revision['name']} -> "
+                        f"adjusted={adjusted:+d} (fixes={fixes}, regressions={regressions})"
+                    )
+                    candidate_logs.append({
+                        "failure_mode": best_label,
+                        "proposal": {
+                            k: v for k, v in revision.items() if not k.startswith("_")
+                        },
+                        "net": adjusted,
+                        "score": adjusted,
+                        "raw_score": raw_score,
+                        "fixes": fixes,
+                        "regressions": regressions,
+                        "baseline_fixes": baseline_fixes,
+                        "baseline_regressions": baseline_regressions,
+                        "contrastive_revision": True,
+                    })
+                    if adjusted > best_adjusted:
+                        print(
+                            f"  [ContrastiveRevision] revision wins: "
+                            f"adjusted={adjusted:+d} > {best_adjusted:+d}"
+                        )
+                        best = revision
+                        best_adjusted = adjusted
+                        best_stats = (fixes, regressions)
+                    else:
+                        print(
+                            f"  [ContrastiveRevision] revision did not improve "
+                            f"({adjusted:+d} <= {best_adjusted:+d}), keeping original"
+                        )
+                except Exception as e:
+                    print(f"  [ContrastiveRevision] eval failed: {e}")
+            else:
+                print("  [ContrastiveRevision] revision failed validation")
+
+        best["_provenance"] = {
+            "epoch": epoch,
+            "update_cycle": update_cycle,
+            "failure_mode": best_label,
+            "probe_score": best_adjusted,
+            "fixes": best_stats[0],
+            "regressions": best_stats[1],
+            "baseline_fixes": baseline_fixes,
+            "baseline_regressions": baseline_regressions,
+            "triggering_sample_ids": [
+                e["sample_id"] for e in best_group_entries if not e.get("is_correct")
+            ][:10],
+        }
+        applied = self.updater.apply([best], self.skill_repo)
+        print(
+            f"  [ProposalRanking] winner: {best['action']}::{best['name']} "
+            f"adjusted={best_adjusted:+d} "
+            f"(fixes={best_stats[0]}, regressions={best_stats[1]})"
+        )
+        print(f"  [SkillUpdate] {best_label}: applied {len(applied)} edit(s)")
+
+        event["applied"] = applied
+        event["raw_proposals"] = raw_proposals
+        event["grpo"] = candidate_logs
+        event["baseline_fixes"] = baseline_fixes
+        event["baseline_regressions"] = baseline_regressions
         return event
 
-    def _build_probe(self, group_entries: List[Dict], all_entries: List[Dict]) -> List[Dict]:
-        selected = list(group_entries)
-        passing = [e for e in all_entries if e.get("is_correct")]
-        failing_other = [e for e in all_entries if not e.get("is_correct") and e not in selected]
-        random.Random(0).shuffle(passing)
-        random.Random(1).shuffle(failing_other)
-        target = max(len(selected), min(self.grpo_eval_n, len(all_entries)))
-        for pool in (passing, failing_other):
-            for entry in pool:
-                if len(selected) >= target:
-                    break
-                selected.append(entry)
-        return selected[:target]
+    def _eval_candidate(
+        self,
+        proposal: Dict,
+        probe: List[Dict],
+        probe_failing_ids: set,
+        update_cycle: int,
+    ) -> Tuple[int, int, int, List[Dict]]:
+        fork = self.skill_repo.fork()
+        try:
+            self.updater.apply([proposal], fork)
+            probe_entries = self._run_samples(
+                [e["_sample"] for e in probe],
+                fork,
+                update_cycle=update_cycle,
+            )
+            fixes, regressions = self._count_probe_transitions(
+                probe_entries,
+                probe_failing_ids,
+            )
+            regressed_traces = [
+                e for e in probe_entries
+                if str(e.get("sample_id")) not in probe_failing_ids
+                and not e.get("is_correct", False)
+            ]
+            return fixes - regressions, fixes, regressions, regressed_traces
+        finally:
+            fork.cleanup()
+
+    @staticmethod
+    def _count_probe_transitions(
+        entries: List[Dict], probe_failing_ids: set
+    ) -> Tuple[int, int]:
+        fixes = 0
+        regressions = 0
+        for entry in entries:
+            sample_id = str(entry.get("sample_id"))
+            is_correct = bool(entry.get("is_correct"))
+            was_failing = sample_id in probe_failing_ids
+            if was_failing and is_correct:
+                fixes += 1
+            elif not was_failing and not is_correct:
+                regressions += 1
+        return fixes, regressions
+
+    @staticmethod
+    def _group_entries_by_failure_mode(
+        entries: List[Dict],
+        labels: Dict[str, str],
+    ) -> List[Tuple[str, List[Dict]]]:
+        if not labels:
+            return [("unknown", entries)]
+        passing = [e for e in entries if e.get("is_correct", False)]
+        groups: Dict[str, List[Dict]] = {}
+        for entry in entries:
+            if entry.get("is_correct", False):
+                continue
+            label = labels.get(str(entry.get("sample_id", "")), "unlabeled")
+            groups.setdefault(label, []).append(entry)
+        if not groups:
+            return [("unknown", entries)]
+        return [
+            (label, group + passing)
+            for label, group in sorted(groups.items(), key=lambda item: len(item[1]), reverse=True)
+        ]
+
+    @staticmethod
+    def _stratified_sample(
+        entries: List[Dict],
+        key_fn,
+        n: int,
+        rng: random.Random,
+    ) -> List[Dict]:
+        if not entries or n <= 0:
+            return []
+        groups: Dict[str, List[Dict]] = {}
+        for entry in entries:
+            groups.setdefault(str(key_fn(entry)), []).append(entry)
+        per_type = max(1, n // len(groups))
+        selected: List[Dict] = []
+        for group_items in groups.values():
+            selected.extend(rng.sample(group_items, min(per_type, len(group_items))))
+        remaining = n - len(selected)
+        if remaining > 0:
+            selected_ids = {id(entry) for entry in selected}
+            pool = [entry for entry in entries if id(entry) not in selected_ids]
+            if pool:
+                selected.extend(rng.sample(pool, min(remaining, len(pool))))
+        return selected
+
+    def _build_probe_set(
+        self,
+        *,
+        all_entries: List[Dict],
+        prev_results: Optional[Dict[str, bool]],
+        epoch: int,
+        update_cycle: int,
+        rng: random.Random,
+    ) -> Tuple[List[Dict], set]:
+        half = self.grpo_eval_n // 2
+        type_key = lambda e: e.get("query_type") or e.get("_sample", {}).get("template") or "other"
+
+        prior_entries = [
+            e for e in all_entries
+            if e.get("update_cycle", update_cycle) < update_cycle
+        ]
+        if prior_entries:
+            failing = [e for e in prior_entries if not e.get("is_correct")]
+            passing = [e for e in prior_entries if e.get("is_correct")]
+            probe_failing_ids = {str(e["sample_id"]) for e in failing}
+            probe = (
+                self._stratified_sample(failing, type_key, half, rng)
+                + self._stratified_sample(passing, type_key, half, rng)
+            )
+            return probe, probe_failing_ids
+
+        if epoch > 0 and prev_results:
+            id_to_sample = {str(s["question_id"]): s for s in self.dev_data}
+            prev_entries = []
+            for sid, ok in prev_results.items():
+                sample = id_to_sample.get(str(sid))
+                if sample is None:
+                    continue
+                prev_entries.append({
+                    "sample_id": str(sid),
+                    "query_type": sample.get("template") or sample.get("main_table_name"),
+                    "is_correct": bool(ok),
+                    "update_cycle": update_cycle - 1,
+                    "_sample": sample,
+                })
+            failing = [e for e in prev_entries if not e.get("is_correct")]
+            passing = [e for e in prev_entries if e.get("is_correct")]
+            probe_failing_ids = {str(e["sample_id"]) for e in failing}
+            probe = (
+                self._stratified_sample(failing, type_key, half, rng)
+                + self._stratified_sample(passing, type_key, half, rng)
+            )
+            return probe, probe_failing_ids
+
+        if all_entries:
+            failing = [e for e in all_entries if not e.get("is_correct")]
+            passing = [e for e in all_entries if e.get("is_correct")]
+            probe_failing_ids = {str(e["sample_id"]) for e in failing}
+            probe = (
+                self._stratified_sample(failing, type_key, half, rng)
+                + self._stratified_sample(passing, type_key, half, rng)
+            )
+            return probe, probe_failing_ids
+
+        return [], set()
 
     def _evaluate_split(self, samples: List[Dict], path: Path, update_cycle: int) -> float:
         print(f"[Eval] evaluating {len(samples)} samples -> {path}")
