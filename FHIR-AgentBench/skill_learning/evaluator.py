@@ -86,14 +86,21 @@ Model answer: {agent_answer}
 
 Return 1 or 0."""
         try:
-            response = litellm.completion(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=None if is_reasoning_llm(self.model) else 0.0,
-                base_url=self.base_url,
-                custom_llm_provider="openai" if self.base_url else None,
-            )
-            text = response.choices[0].message.content.strip()
+            if self.model.startswith("vertex_ai/") and not self.base_url:
+                from core_utils import _vertex_ai_complete
+                msg, _err, _usage = _vertex_ai_complete(
+                    self.model, [{"role": "user", "content": prompt}], temperature=0.0
+                )
+                text = (msg.content or "").strip()
+            else:
+                response = litellm.completion(
+                    model=self.model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=None if is_reasoning_llm(self.model) else 0.0,
+                    base_url=self.base_url,
+                    custom_llm_provider="openai" if self.base_url else None,
+                )
+                text = response.choices[0].message.content.strip()
             return text.startswith("1")
         except Exception as e:
             print(f"[FHIRSkillCycle] evaluator failed: {e}")

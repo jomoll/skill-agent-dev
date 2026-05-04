@@ -4,6 +4,7 @@ import io
 import json
 import random
 import shutil
+import os
 import signal
 import sys
 import logging
@@ -100,7 +101,12 @@ class FHIRSkillCycleRunner:
         self.agent_model = agent_cfg["model"]
         self.agent_base_url = agent_cfg.get("base_url")
         self.verbose_agent = bool(agent_cfg.get("verbose", False))
-
+        
+        if agent_cfg.get("project_id"):
+            os.environ["VERTEXAI_PROJECT"] = str(agent_cfg["project_id"])
+        if agent_cfg.get("location"):
+            os.environ["VERTEXAI_LOCATION"] = str(agent_cfg["location"])
+            
         updater_cfg = config.get("updater", {})
         self.updater_agent = LiteLLMAgent(
             model=updater_cfg.get("model", self.agent_model),

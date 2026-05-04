@@ -342,9 +342,242 @@ def count_tokens_in_messages(messages) -> int:
     return tokens + 2
 
 
+class _VertexFunction:
+    def __init__(self, name: str, arguments: str):
+        self.name = name
+        self.arguments = arguments
+
+    def to_dict(self):
+        return {"name": self.name, "arguments": self.arguments}
+
+
+class _VertexToolCall:
+    def __init__(
+        self,
+        name: str,
+        args: dict,
+        call_id: Optional[str] = None,
+        thought_signature: Optional[str] = None,
+    ):
+        self.id = call_id or f"call_{uuid.uuid4().hex}"
+        self.type = "function"
+        self.function = _VertexFunction(name, json.dumps(args or {}))
+        self.thought_signature = thought_signature
+
+    def to_dict(self):
+        result = {
+            "id": self.id,
+            "type": self.type,
+            "function": self.function.to_dict(),
+        }
+        if self.thought_signature:
+            result["extra_content"] = {"google": {"thought_signature": self.thought_signature}}
+        return result
+
+
+class _VertexMessage:
+    def __init__(self, content=None, role="assistant", tool_calls=None):
+        self.content = content
+        self.role = role
+        self.tool_calls = tool_calls
+
+    def get(self, key, default=None):
+        return getattr(self, key, default)
+
+    def to_dict(self):
+        result = {"role": self.role, "content": self.content}
+        if self.tool_calls:
+            result["tool_calls"] = [tc.to_dict() for tc in self.tool_calls]
+        return result
+
+
+def _as_message_dict(msg) -> dict:
+    if isinstance(msg, dict):
+        return msg
+    if hasattr(msg, "to_dict"):
+        return msg.to_dict()
+    if hasattr(msg, "model_dump"):
+        return msg.model_dump(exclude_none=True)
+    return {
+        "role": getattr(msg, "role", "assistant"),
+        "content": getattr(msg, "content", None),
+        "tool_calls": getattr(msg, "tool_calls", None),
+    }
+
+
+def _vertex_tool_declarations(tools: Optional[list]) -> list:
+    declarations = []
+    for tool in tools or []:
+        fn = tool.get("function", {}) if isinstance(tool, dict) else {}
+        if not fn.get("name"):
+            continue
+        declarations.append(
+            {
+                "name": fn["name"],
+                "description": fn.get("description", ""),
+                "parameters": fn.get("parameters", {"type": "object", "properties": {}}),
+            }
+        )
+    return [{"functionDeclarations": declarations}] if declarations else []
+
+
+def _vertex_ai_complete(
+    model: str,
+    messages: list,
+    tools: Optional[list] = None,
+    temperature: float = 0.0,
+    max_tokens: int = 32000,
+):
+    """Direct Vertex AI call using google-auth — same approach as AgentBench VertexAgent."""
+    import os
+    import requests as _requests
+    import google.auth
+    import google.auth.transport.requests
+
+    model_name = model.removeprefix("vertex_ai/")
+    project_id = os.environ.get("VERTEXAI_PROJECT", "")
+    location = os.environ.get("VERTEXAI_LOCATION", "us-central1")
+
+    credentials, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+    if not credentials.valid:
+        credentials.refresh(google.auth.transport.requests.Request())
+
+    endpoint = (
+        f"https://aiplatform.googleapis.com/v1/projects/{project_id}"
+        f"/locations/{location}/publishers/google/models/{model_name}:generateContent"
+    )
+
+    contents = []
+    system_parts = []
+    i = 0
+    while i < len(messages):
+        msg = _as_message_dict(messages[i])
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+        if role == "system":
+            system_parts.append({"text": str(content)})
+        elif role == "tool":
+            response_parts = []
+            while i < len(messages):
+                tool_msg = _as_message_dict(messages[i])
+                if tool_msg.get("role") != "tool":
+                    break
+                response_parts.append(
+                    {
+                        "functionResponse": {
+                            "name": tool_msg.get("name", "tool"),
+                            "response": {"content": str(tool_msg.get("content", ""))},
+                        }
+                    }
+                )
+                i += 1
+            contents.append(
+                {
+                    "role": "user",
+                    "parts": response_parts,
+                }
+            )
+            continue
+        elif role in ("assistant", "model"):
+            parts = []
+            for call in msg.get("tool_calls") or []:
+                call = call.to_dict() if hasattr(call, "to_dict") else call
+                fn = call.get("function", {}) if isinstance(call, dict) else {}
+                args = fn.get("arguments") or "{}"
+                try:
+                    args = json.loads(args) if isinstance(args, str) else args
+                except json.JSONDecodeError:
+                    args = {}
+                if fn.get("name"):
+                    part = {"functionCall": {"name": fn["name"], "args": args}}
+                    extra = call.get("extra_content", {}) if isinstance(call, dict) else {}
+                    thought_signature = (
+                        extra.get("google", {}).get("thought_signature")
+                        or call.get("thought_signature")
+                        or call.get("thoughtSignature")
+                    )
+                    if thought_signature:
+                        part["thoughtSignature"] = thought_signature
+                    parts.append(part)
+            if content:
+                parts.append({"text": str(content)})
+            contents.append({"role": "model", "parts": parts or [{"text": ""}]})
+        else:
+            contents.append({"role": "user", "parts": [{"text": str(content)}]})
+        i += 1
+
+    body: dict = {
+        "contents": contents,
+        "generationConfig": {"temperature": temperature, "maxOutputTokens": max_tokens},
+    }
+    if system_parts:
+        body["systemInstruction"] = {"parts": system_parts}
+    vertex_tools = _vertex_tool_declarations(tools)
+    if vertex_tools:
+        body["tools"] = vertex_tools
+
+    resp = _requests.post(
+        endpoint,
+        json=body,
+        headers={"Authorization": f"Bearer {credentials.token}", "Content-Type": "application/json"},
+        timeout=120,
+    )
+    try:
+        resp.raise_for_status()
+    except Exception as e:
+        detail = getattr(resp, "text", "")
+        raise RuntimeError(f"{e}: {detail[:1000]}") from e
+    result = resp.json()
+
+    parts = result["candidates"][0]["content"].get("parts", [])
+    text = "\n".join(p["text"] for p in parts if "text" in p)
+    tool_calls = []
+    for p in parts:
+        if "functionCall" in p and p["functionCall"].get("name"):
+            tool_calls.append(
+                _VertexToolCall(
+                    p["functionCall"]["name"],
+                    p["functionCall"].get("args") or {},
+                    thought_signature=(
+                        p.get("thoughtSignature")
+                        or p.get("thought_signature")
+                        or p["functionCall"].get("thoughtSignature")
+                        or p["functionCall"].get("thought_signature")
+                    ),
+                )
+            )
+    usage = result.get("usageMetadata", {})
+    usage_info = {
+        "prompt_tokens": usage.get("promptTokenCount", 0),
+        "completion_tokens": usage.get("candidatesTokenCount", 0),
+        "total_tokens": usage.get("totalTokenCount", 0),
+        "cost": 0.0,
+    }
+
+    return _VertexMessage(text or None, tool_calls=tool_calls or None), None, usage_info
+
+
 def safe_llm_call(model, messages, tools=None, temperature=0.0, parallel_tool_calls=True, max_retries=20, max_tokens=32000, base_url=None):
     """Safe LLM API call with context length validation and retry logic."""
-    
+
+    if model.startswith("vertex_ai/") and not base_url:
+        for attempt in range(max_retries):
+            try:
+                return _vertex_ai_complete(
+                    model,
+                    messages,
+                    tools=tools,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+            except Exception as e:
+                if "400 Client Error" in str(e) or "Bad Request" in str(e):
+                    return None, f"BadRequestError: {e}", None
+                if attempt < max_retries - 1:
+                    time.sleep(5)
+                else:
+                    return None, f"Max retries exceeded: {e}", None
+
     input_tokens = count_tokens_in_messages(messages)
     if input_tokens > max_tokens:
         return None, f"Input tokens exceeded: {input_tokens} > {max_tokens}", None
