@@ -1,0 +1,38 @@
+output_dir: "outputs/skill_cycle"
+
+agent:
+  strategy: "multi_turn_code_resource"
+  model: "openai/gpt-oss-120b"
+  base_url: "http://10.32.16.43:4000"
+  verbose: false
+  enable_cache: true
+
+updater:
+  model: "openai/gpt-oss-120b"
+  base_url: "http://10.32.16.43:4000"
+  temperature: 0.7
+  max_tokens: 32000
+
+eval:
+  model: "openai/gpt-oss-120b"
+  base_url: "http://10.32.16.43:4000"
+
+data:
+  csv: "final_dataset/questions_answers_sql_fhir.csv"
+  dev_splits: ["train"]
+  val_splits: ["valid"]
+  dev_limit: 80
+  val_limit: 40
+
+skills:
+  base_dir: "skills/base"
+
+cycle:
+  epochs: 5
+  update_every: 40
+  batch_concurrency: 10
+  max_proposals: 1
+  max_learned_skills: 10
+  grpo_k: 4
+  grpo_eval_n: 30
+  run_baseline: true
