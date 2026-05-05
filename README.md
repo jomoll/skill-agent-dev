@@ -92,11 +92,10 @@ The new task types (redesigned from the ground up vs. v1) are qualitatively hard
 
 Two agent tools are added relative to MedAgentBench: `fhir_procedure_search` and `fhir_condition_search`. These are structural requirements — several task types cannot be attempted without reading Procedure or Condition resources — not performance boosters.
 
+MedAgentBench-v2 has identical dependencies to MedAgentBench — reuse the same conda environment:
+
 ```bash
-cd MedAgentBench-v2
-conda create -n medagentbench-v2 python=3.9
-conda activate medagentbench-v2
-pip install -r requirements.txt
+conda activate medagentbench
 ```
 
 Start the same FHIR server (shared with MedAgentBench, same port):
@@ -247,7 +246,7 @@ python -m src.skill_cycle --config configs/skill_cycle.yaml --run-name run_001
 docker run -p 8080:8080 medagentbench
 
 # Terminal 2 — start task worker
-cd MedAgentBench-v2 && conda activate medagentbench-v2
+cd MedAgentBench-v2 && conda activate medagentbench
 python -m src.start_task -a --config configs/start_task.yaml --controller-port 5070 --base-port 5071
 
 # Terminal 3 — run skill cycle
