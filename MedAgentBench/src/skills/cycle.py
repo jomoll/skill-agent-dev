@@ -860,7 +860,7 @@ class SkillCycleRunner:
                 "baseline_regressions": baseline_regressions,
                 "invalid_action_regression_penalty": _INVALID_ACTION_REGRESSION_PENALTY,
             })
-            if adjusted > best_adjusted:
+            if adjusted > best_adjusted and regressions <= baseline_regressions:
                 best_adjusted = adjusted
                 best_candidate = proposal
                 best_stats = (fixes, regressions, invalid_regr)
@@ -894,7 +894,7 @@ class SkillCycleRunner:
                     "baseline_regressions": baseline_regressions,
                     "contrastive_revision": True,
                 })
-                if rev_adjusted > best_adjusted:
+                if rev_adjusted > best_adjusted and rev_regressions <= baseline_regressions:
                     print(f"  [ContrastiveRevision] revision wins: "
                           f"adjusted={rev_adjusted:+d} > {best_adjusted:+d}")
                     best_candidate = rev_candidate
@@ -975,6 +975,8 @@ class SkillCycleRunner:
                     if probe_result is None:
                         continue
                     is_correct, status, agent_actions, history = probe_result
+                    if status == "error":
+                        continue
                     was_failing = sample["id"] in probe_failing_ids
                     if was_failing and is_correct:
                         fixes += 1
@@ -1019,7 +1021,8 @@ class SkillCycleRunner:
             from src.client.task import TaskError
             if result.error == TaskError.NOT_AVAILABLE.value:
                 return None
-            return _score_result(sample, result, self.fhir_api_base)
+            status = result.output.status if result.output else "error"
+            return _score_result(sample, result, self.fhir_api_base), status
 
         with ThreadPoolExecutor(max_workers=self.batch_concurrency) as pool:
             futures = {pool.submit(run_one, s): s for s in probe_set}
@@ -1031,8 +1034,11 @@ class SkillCycleRunner:
                 position=2,
             ):
                 sample = futures[future]
-                is_correct = future.result()
-                if is_correct is None:
+                result_tuple = future.result()
+                if result_tuple is None:
+                    continue
+                is_correct, status = result_tuple
+                if status == "error":
                     continue
                 was_failing = sample["id"] in probe_failing_ids
                 if was_failing and is_correct:

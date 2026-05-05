@@ -9,8 +9,16 @@ from tools.resource_tools import supported_types
 class MultiTurnCodeResourceAgent(BaseAgent):
     """Multi-step ReAct agent that iteratively uses FHIR resource tools to retrieve patient data and perform reasoning via Python code execution."""
 
-    def __init__(self, model: str, max_iterations: int = 30, verbose: bool = False, base_url=None):
-        super().__init__(model, verbose, base_url)
+    def __init__(
+        self,
+        model: str,
+        max_iterations: int = 30,
+        verbose: bool = False,
+        base_url=None,
+        timeout: int = 20,
+        max_retries: int = 3,
+    ):
+        super().__init__(model, verbose, base_url, timeout=timeout, max_retries=max_retries)
 
         all_tools = get_tool_definitions()
         self.tools = [tool for tool in all_tools if tool["function"]["name"] in 
@@ -188,7 +196,9 @@ Follow these examples to structure your approach: retrieve relevant FHIR resourc
                 model=self.model,
                 messages=self.messages,
                 tools=self.tools,
-                base_url=self.base_url
+                base_url=self.base_url,
+                timeout=self.timeout,
+                max_retries=self.max_retries,
             )
 
             self.messages.append(response_message)

@@ -33,8 +33,17 @@ def create_skill_aware_fhir_agent(
     base_url: Optional[str],
     verbose: bool,
     skill_repo: SkillRepository,
+    timeout: int = 20,
+    max_retries: int = 3,
 ):
-    agent = create_agent(agent_strategy, model, verbose=verbose, base_url=base_url)
+    agent = create_agent(
+        agent_strategy,
+        model,
+        verbose=verbose,
+        base_url=base_url,
+        timeout=timeout,
+        max_retries=max_retries,
+    )
     skill_block = render_skills(skill_repo)
     if not skill_block:
         return agent
@@ -62,11 +71,15 @@ class LiteLLMAgent:
         base_url: Optional[str] = None,
         temperature: float = 0.0,
         max_tokens: int = 32000,
+        timeout: int = 20,
+        max_retries: int = 3,
     ) -> None:
         self.model = model
         self.base_url = base_url
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.timeout = timeout
+        self.max_retries = max_retries
 
     def inference(self, history: List[Dict]) -> str:
         response, error, _usage = safe_llm_call(
@@ -75,6 +88,8 @@ class LiteLLMAgent:
             temperature=self.temperature,
             max_tokens=self.max_tokens,
             base_url=self.base_url,
+            timeout=self.timeout,
+            max_retries=self.max_retries,
         )
         if error:
             raise RuntimeError(error)

@@ -17,7 +17,14 @@ class BaseAgent:
     - Basic message management
     """
     
-    def __init__(self, model: str, verbose: bool = False, base_url=None):
+    def __init__(
+        self,
+        model: str,
+        verbose: bool = False,
+        base_url=None,
+        timeout: int = 20,
+        max_retries: int = 3,
+    ):
         """
         Initialize the base agent.
         
@@ -29,6 +36,8 @@ class BaseAgent:
         self.verbose = verbose
         self.messages = []
         self.base_url = base_url
+        self.timeout = timeout
+        self.max_retries = max_retries
         
         # Initialize usage tracking
         self.total_usage = {

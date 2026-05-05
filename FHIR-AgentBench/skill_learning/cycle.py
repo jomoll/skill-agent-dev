@@ -16,7 +16,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import pandas as pd
 import yaml
@@ -101,6 +101,8 @@ class FHIRSkillCycleRunner:
         self.agent_model = agent_cfg["model"]
         self.agent_base_url = agent_cfg.get("base_url")
         self.verbose_agent = bool(agent_cfg.get("verbose", False))
+        self.agent_timeout = int(agent_cfg.get("timeout", 20))
+        self.agent_max_retries = int(agent_cfg.get("max_retries", 3))
         
         if agent_cfg.get("project_id"):
             os.environ["VERTEXAI_PROJECT"] = str(agent_cfg["project_id"])
@@ -113,6 +115,8 @@ class FHIRSkillCycleRunner:
             base_url=updater_cfg.get("base_url", self.agent_base_url),
             temperature=float(updater_cfg.get("temperature", 0.0)),
             max_tokens=int(updater_cfg.get("max_tokens", 32000)),
+            timeout=int(updater_cfg.get("timeout", 20)),
+            max_retries=int(updater_cfg.get("max_retries", 3)),
         )
 
         eval_cfg = config.get("eval", {})
@@ -120,6 +124,8 @@ class FHIRSkillCycleRunner:
             model=eval_cfg.get("model", self.agent_model),
             base_url=eval_cfg.get("base_url", self.agent_base_url),
             cache_path=self.run_dir / "eval_cache.json",
+            timeout=int(eval_cfg.get("timeout", 20)),
+            max_retries=int(eval_cfg.get("max_retries", 3)),
         )
 
         cycle_cfg = config["cycle"]
@@ -149,6 +155,11 @@ class FHIRSkillCycleRunner:
         )
         self._progress_stream = None
         self.resume = bool(config.get("_resume", False))
+
+        # Best-checkpoint tracking: snapshot learned/ whenever val improves
+        self._best_val_score: float = 0.0
+        self._best_checkpoint_label: Any = None
+        self._best_skills_dir: Path = self.run_dir / "skills" / "best"
 
     def run(self) -> None:
         log_path = self.run_dir / "run.log"
@@ -185,6 +196,12 @@ class FHIRSkillCycleRunner:
             print("[FHIRSkillCycle] run started", flush=True)
             self._run_inner()
             self._write_state("completed")
+            restored = self._restore_best_checkpoint()
+            if restored:
+                print(
+                    f"[BestCheckpoint] Final skills restored from best checkpoint: "
+                    f"epoch={self._best_checkpoint_label}, val={self._best_val_score:.1%}"
+                )
             print("[FHIRSkillCycle] run completed", flush=True)
         except SystemExit as e:
             current_state = {}
@@ -216,6 +233,27 @@ class FHIRSkillCycleRunner:
             self._progress_stream = None
             log_file.close()
 
+    def _maybe_update_best_checkpoint(self, val_score: float, label: Any) -> None:
+        """Snapshot learned/ to skills/best/ whenever val improves."""
+        if val_score > self._best_val_score:
+            self._best_val_score = val_score
+            self._best_checkpoint_label = label
+            if self._best_skills_dir.exists():
+                shutil.rmtree(self._best_skills_dir)
+            shutil.copytree(self.skill_repo.learned_dir, self._best_skills_dir)
+            print(
+                f"[BestCheckpoint] New best: epoch={label}, val={val_score:.1%} — snapshot saved"
+            )
+
+    def _restore_best_checkpoint(self) -> bool:
+        """Replace learned/ with the best-checkpoint snapshot. Returns True if restored."""
+        if not self._best_skills_dir.exists():
+            return False
+        if self.skill_repo.learned_dir.exists():
+            shutil.rmtree(self.skill_repo.learned_dir)
+        shutil.copytree(self._best_skills_dir, self.skill_repo.learned_dir)
+        return True
+
     def _write_state(self, phase: str, **fields) -> None:
         state = {
             "phase": phase,
@@ -246,6 +284,7 @@ class FHIRSkillCycleRunner:
             print(f"[Baseline] Val: {score:.1%}")
             val_scores.append({"epoch": -1, "score": score})
             (self.run_dir / "val_scores.json").write_text(json.dumps(val_scores, indent=2), encoding="utf-8")
+            self._maybe_update_best_checkpoint(score, "baseline")
 
         prev_taxonomy: Dict[str, str] = {}
         prev_results: Optional[Dict[str, bool]] = None
@@ -263,6 +302,7 @@ class FHIRSkillCycleRunner:
             )
             (self.run_dir / "val_scores.json").write_text(json.dumps(val_scores, indent=2), encoding="utf-8")
             print(f"[Epoch {epoch}] Val: {val_score:.1%}")
+            self._maybe_update_best_checkpoint(val_score, epoch)
 
     def _run_epoch(
         self,
@@ -499,7 +539,7 @@ class FHIRSkillCycleRunner:
                 "baseline_fixes": baseline_fixes,
                 "baseline_regressions": baseline_regressions,
             })
-            if adjusted > best_adjusted:
+            if adjusted > best_adjusted and regressions <= baseline_regressions:
                 best = candidate
                 best_label = label
                 best_group_entries = candidate_info["group_entries"]
@@ -553,7 +593,7 @@ class FHIRSkillCycleRunner:
                         "baseline_regressions": baseline_regressions,
                         "contrastive_revision": True,
                     })
-                    if adjusted > best_adjusted:
+                    if adjusted > best_adjusted and regressions <= baseline_regressions:
                         print(
                             f"  [ContrastiveRevision] revision wins: "
                             f"adjusted={adjusted:+d} > {best_adjusted:+d}"
@@ -634,6 +674,10 @@ class FHIRSkillCycleRunner:
         fixes = 0
         regressions = 0
         for entry in entries:
+            if entry.get("error"):
+                # Agent failed to produce parseable output — not attributable to
+                # skill quality, exclude from fix/regression accounting.
+                continue
             sample_id = str(entry.get("sample_id"))
             is_correct = bool(entry.get("is_correct"))
             was_failing = sample_id in probe_failing_ids
@@ -887,6 +931,8 @@ class FHIRSkillCycleRunner:
             base_url=self.agent_base_url,
             verbose=self.verbose_agent,
             skill_repo=repo,
+            timeout=self.agent_timeout,
+            max_retries=self.agent_max_retries,
         )
         try:
             raw_output = agent.run(sample["question_with_context"])

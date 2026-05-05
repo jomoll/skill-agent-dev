@@ -8,8 +8,15 @@ from tools.resource_tools import supported_types
 class SingleTurnRequestAgent(BaseAgent):
     """Single-step agent that uses a FHIR request tool to retrieve patient data and perform reasoning using natural language."""
 
-    def __init__(self, model: str, verbose: bool = False, base_url=None):
-        super().__init__(model, verbose, base_url)
+    def __init__(
+        self,
+        model: str,
+        verbose: bool = False,
+        base_url=None,
+        timeout: int = 20,
+        max_retries: int = 3,
+    ):
+        super().__init__(model, verbose, base_url, timeout=timeout, max_retries=max_retries)
 
         all_tools = get_tool_definitions()
         self.tools = [tool for tool in all_tools if tool["function"]["name"] in 
@@ -56,7 +63,9 @@ Follow these examples to structure your approach: make appropriate FHIR requests
             model=self.model,
             messages=self.messages,
             tools=self.tools,
-            base_url=self.base_url
+            base_url=self.base_url,
+            timeout=self.timeout,
+            max_retries=self.max_retries,
         )
         
         self.messages.append(response_message)
@@ -119,7 +128,9 @@ Follow these examples to structure your approach: make appropriate FHIR requests
         final_message, final_error, final_usage_info = safe_llm_call(
             model=self.model,
             messages=self.messages,
-            base_url=self.base_url
+            base_url=self.base_url,
+            timeout=self.timeout,
+            max_retries=self.max_retries,
         )
             
         self.messages.append(final_message)

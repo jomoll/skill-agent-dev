@@ -269,7 +269,14 @@ def curate_input_dataset(df, add_patient_fhir_id):
 # Agent Management
 # =============================================================================
 
-def create_agent(agent_strategy, model, verbose=False, base_url=None):
+def create_agent(
+    agent_strategy,
+    model,
+    verbose=False,
+    base_url=None,
+    timeout=20,
+    max_retries=3,
+):
     """Create agent instance based on strategy."""
     agents = {
         "single_turn_request": ("agent.single_turn_request_agent", "SingleTurnRequestAgent"),
@@ -286,7 +293,13 @@ def create_agent(agent_strategy, model, verbose=False, base_url=None):
     module = __import__(module_name, fromlist=[class_name])
     agent_class = getattr(module, class_name)
     
-    return agent_class(model=model, verbose=verbose, base_url=base_url)
+    return agent_class(
+        model=model,
+        verbose=verbose,
+        base_url=base_url,
+        timeout=timeout,
+        max_retries=max_retries,
+    )
 
 
 def run_agent_safe(agent, input_data):
@@ -558,7 +571,17 @@ def _vertex_ai_complete(
     return _VertexMessage(text or None, tool_calls=tool_calls or None), None, usage_info
 
 
-def safe_llm_call(model, messages, tools=None, temperature=0.0, parallel_tool_calls=True, max_retries=20, max_tokens=32000, base_url=None):
+def safe_llm_call(
+    model,
+    messages,
+    tools=None,
+    temperature=0.0,
+    parallel_tool_calls=True,
+    max_retries=3,
+    max_tokens=32000,
+    base_url=None,
+    timeout=20,
+):
     """Safe LLM API call with context length validation and retry logic."""
 
     if model.startswith("vertex_ai/") and not base_url:
@@ -571,7 +594,7 @@ def safe_llm_call(model, messages, tools=None, temperature=0.0, parallel_tool_ca
                     tools=tools,
                     temperature=temperature,
                     max_tokens=max_tokens,
-                    timeout=20,
+                    timeout=timeout,
                 )
             except Exception as e:
                 if "400 Client Error" in str(e) or "Bad Request" in str(e):
@@ -596,7 +619,8 @@ def safe_llm_call(model, messages, tools=None, temperature=0.0, parallel_tool_ca
                 temperature=None if is_reasoning_llm(model) else temperature,
                 parallel_tool_calls=parallel_tool_calls if tools else None,
                 base_url=base_url,
-                custom_llm_provider="openai" if base_url else None
+                custom_llm_provider="openai" if base_url else None,
+                timeout=timeout,
             )
 
             cost = 0.0
