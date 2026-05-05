@@ -73,7 +73,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--auto-controller", "-a", dest="controller", action="store_true"
     )
-    parser.add_argument("--base-port", "-p", dest="port", type=int, default=5002)
+    parser.add_argument("--base-port", "-p", dest="port", type=int, default=None)
 
     args = parser.parse_args()
 
@@ -108,7 +108,12 @@ if __name__ == "__main__":
         else:
             raise Exception("Controller failed to start")
 
-    base_port = args.port
+    if args.port is not None:
+        base_port = args.port
+    elif "base_port" in config:
+        base_port = config["base_port"]
+    else:
+        base_port = 5002
 
     if args.controller_addr:
         controller_addr = args.controller_addr

@@ -490,7 +490,8 @@ class FHIRSkillCycleRunner:
         print(
             f"  [ProposalRanking] baseline probe: "
             f"{baseline_fixes} fixes, {baseline_regressions} regressions "
-            f"(current skills, no proposal)"
+            f"(current skills, no proposal); "
+            f"{len(baseline_error_ids)} pre-existing errors excluded from regression count"
         )
 
         best = None

@@ -1079,7 +1079,8 @@ class SkillCycleRunner:
 
         print(f"  [ProposalRanking] baseline probe: "
               f"{baseline_fixes} fixes, {baseline_regressions} regressions "
-              f"(current skills, no proposal)")
+              f"(current skills, no proposal); "
+              f"{len(baseline_error_ids)} pre-existing errors excluded from regression count")
         return baseline_fixes, baseline_regressions, baseline_error_ids
 
     def _contrastive_revision(

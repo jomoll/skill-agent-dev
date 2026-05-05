@@ -1,10 +1,13 @@
 # Start the MedAgentBench task worker for the skill-learning cycle.
 #
 # Usage:
-#   python -m src.start_task -a --config configs/start_task.yaml --controller http://localhost:5050/api --base-port 5051
+#   python -m src.start_task -a --config configs/start_task.yaml
 #
 # Then in a separate terminal:
-#   python -m src.skill_cycle --config configs/skill_cycle_local.yaml --run-name run_001
+#   python -m src.skill_cycle --config configs/skill_cycle.yaml --run-name run_001
+
+controller: "http://localhost:5050/api"
+base_port: 5051
 
 definition:
   import: tasks/task_assembly.yaml

@@ -1,5 +1,6 @@
 # Ignore everything by default.
 *
+outputs
 
 # Keep the ignore file itself tracked.
 !.gitignore

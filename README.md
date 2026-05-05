@@ -14,11 +14,22 @@ skill-agent-dev/
 
 After each batch of task episodes, a skill-writing LLM observes the agent's failure traces and proposes additions, modifications, or removals to a markdown skill library. Candidates are scored on a balanced probe set (fixes − regressions), and the winner is applied only if it improves net score without exceeding baseline regressions. Skills are injected as structured JSON context into every subsequent inference call — no fine-tuning required.
 
-### Memory comparator
+### Memory comparators
 
-Each benchmark also ships a `memory_cycle` alongside the `skill_cycle`. The memory cycle uses the **same agent, same updater model, same epoch/batch schedule, and same probe/val evaluation** as the skill cycle. The only difference: instead of proposing validated skill files, the updater synthesizes 1–3 natural-language correction bullets after each batch and appends them to a `<memory>` block in the agent's system prompt. Memory is applied unconditionally (no acceptance gate), making it a clean "no structure, no gate" baseline against which the skill cycle's advantages can be isolated.
+Each benchmark ships two memory-based comparators alongside the `skill_cycle`, answering two questions: (1) does structured skill encoding beat cheap natural-language memory, and (2) does the batch vs. per-sample update cadence matter?
 
-This design answers two questions simultaneously: (1) does structured, auditable skill encoding beat cheap natural-language memory, and (2) how much of the skill cycle's gain comes from the regression-budget acceptance gate vs. the representation itself?
+**`memory_cycle` (sequential, paper-faithful)** — matches the MedAgentBench-v2 paper (Appendix A.2). After each individual failing sample, the updater LLM is called once with the paper's prompt template:
+
+```
+<task_description>  {instruction + context}
+<agent_response>    {agent's final answer}
+<eval_output>       {ref_sol + pass/fail}
+<current_prompt>    {current <memory> block}
+```
+
+Output is plain prose starting with `"when asked ..."` — task-specific conditional instructions, not general rules. Dev samples are run sequentially (no parallelism); val evaluation is still parallelised.
+
+**`batch_memory_cycle`** — parallel batches of `update_every` samples; memory updated once per batch from all failing traces in that batch. Matches our skill cycle's batch cadence for a direct apples-to-apples comparison. Memory notes use the same paper-style prompt but process multiple failing entries per update call (one LLM call per entry).
 
 ---
 
@@ -152,7 +163,7 @@ docker network create os_interaction_default || true
 | LTP | 5020 | 5021 |
 | Card Game | 5030 | 5031 |
 | ALFWorld | 5060 | 5061 |
-| MedAgentBench | 5001 (default) | 5002 |
+| MedAgentBench | 5050 | 5051 |
 | MedAgentBench-v2 | 5070 | 5071 |
 | FHIR-AgentBench | none | none |
 
@@ -247,7 +258,7 @@ docker run -p 8080:8080 medagentbench
 
 # Terminal 2 — start task worker
 cd MedAgentBench-v2 && conda activate medagentbench
-python -m src.start_task -a --config configs/start_task.yaml --controller-port 5070 --base-port 5071
+python -m src.start_task -a --config configs/start_task.yaml --base-port 5071
 
 # Terminal 3 — run skill cycle
 python -m src.skill_cycle --config configs/skill_cycle.yaml --run-name run_001
@@ -295,11 +306,16 @@ python -m src.run_manual_skills --config configs/manual_skills_dbbench.yaml --sp
 
 ## Running the memory cycle
 
-The memory cycle is a drop-in comparator that runs on the same agent and data as the skill cycle. Replace `skill_cycle` with `memory_cycle` in the commands above:
+Both memory comparators share all infrastructure with the skill cycle (task workers, ports, FHIR server). No additional setup is needed.
+
+### Sequential memory cycle (paper-faithful)
 
 ```bash
-# AgentBench (any task type)
+# AgentBench (OS Interaction)
 python -m src.memory_cycle --config configs/memory_cycle_os.yaml --run-name mem_001
+
+# AgentBench (DBBench)
+python -m src.memory_cycle --config configs/memory_cycle_dbbench.yaml --run-name mem_001
 
 # MedAgentBench
 python -m src.memory_cycle --config configs/memory_cycle.yaml --run-name mem_001
@@ -311,29 +327,39 @@ python -m src.memory_cycle --config configs/memory_cycle.yaml --run-name mem_001
 python memory_cycle.py --config configs/memory_cycle.yaml --run-name mem_001
 ```
 
-The memory cycle shares all infrastructure with the skill cycle (task workers, ports, FHIR server). No additional setup is needed.
+### Batch memory cycle
+
+```bash
+# AgentBench (OS Interaction)
+python -m src.batch_memory_cycle --config configs/batch_memory_cycle_os.yaml --run-name mem_001
+
+# AgentBench (DBBench)
+python -m src.batch_memory_cycle --config configs/batch_memory_cycle_dbbench.yaml --run-name mem_001
+
+# MedAgentBench
+python -m src.batch_memory_cycle --config configs/batch_memory_cycle.yaml --run-name mem_001
+
+# MedAgentBench-v2
+python -m src.batch_memory_cycle --config configs/batch_memory_cycle.yaml --run-name mem_001
+
+# FHIR-AgentBench
+python batch_memory_cycle.py --config configs/batch_memory_cycle.yaml --run-name mem_001
+```
 
 **Design principles for a fair comparison:**
-- Same base agent configuration — no enhanced system prompt, no additional tools
-- Same dev/val splits, same batch size, same update cadence (one update per batch)
-- Same updater model and failure classification step
-- Memory bullets are appended unconditionally (no probe-based acceptance gate) — this is intentional: the gate is one of the variables being tested
-- Val score is tracked identically, enabling direct learning-curve comparison
+- Same base agent and updater model as the skill cycle — no enhanced system prompt, no additional tools
+- Same dev/val splits and val evaluation
+- Memory notes appended unconditionally (no probe-based acceptance gate) — the gate is one of the variables under test
+- Val score tracked identically, enabling direct learning-curve comparison
 
 **Implementation across benchmarks:**
 
-| Benchmark | Memory agent | Memory storage | Bullet synthesis |
+| Benchmark | Memory agent | Memory storage | Note synthesis |
 |---|---|---|---|
-| AgentBench / MedAgentBench / MedAgentBench-v2 | `MemoryAwareAgent` wrapping base agent | `<memory>` block in system prompt | Same updater model as skills |
-| FHIR-AgentBench | Memory block prepended to agent system prompt per run | In-memory list serialized to `memory.md` in run dir | Same updater |
+| AgentBench / MedAgentBench / MedAgentBench-v2 | `MemoryAwareAgent` wrapping base agent | `memory.json` (flat JSON list) injected as `<memory>` block | One LLM call per failing sample, paper prompt format |
+| FHIR-AgentBench | Memory block prepended to agent `system_msg` per run | `memory.json` in run dir | Same paper prompt format |
 
-Key config knobs (in `memory_cycle.yaml` for each benchmark):
-
-```yaml
-memory:
-  max_bullets: 10          # evict oldest when exceeded
-  bullets_per_update: 3    # max new bullets synthesized per batch
-```
+The `update_every` and `batch_concurrency` keys are used only by the batch variant; the sequential variant ignores `update_every` (updates after every failure) but still uses `batch_concurrency` for parallelised val evaluation. Memory grows unbounded — no condensing, matching the original paper.
 
 ---
 
@@ -403,14 +429,19 @@ Key config files:
 | `AgentBench/configs/skill_cycle_ltp.yaml` | LTP skill cycle hyperparameters |
 | `AgentBench/configs/skill_cycle_card_game.yaml` | Card Game skill cycle hyperparameters |
 | `AgentBench/configs/skill_cycle_alfworld.yaml` | ALFWorld skill cycle hyperparameters |
-| `AgentBench/configs/memory_cycle_os.yaml` | OS memory cycle hyperparameters |
-| `AgentBench/configs/memory_cycle_dbbench.yaml` | DBBench memory cycle hyperparameters |
+| `AgentBench/configs/memory_cycle_os.yaml` | OS sequential memory cycle |
+| `AgentBench/configs/memory_cycle_dbbench.yaml` | DBBench sequential memory cycle |
+| `AgentBench/configs/batch_memory_cycle_os.yaml` | OS batch memory cycle |
+| `AgentBench/configs/batch_memory_cycle_dbbench.yaml` | DBBench batch memory cycle |
 | `MedAgentBench/configs/skill_cycle.yaml` | MedAgentBench skill cycle hyperparameters |
-| `MedAgentBench/configs/memory_cycle.yaml` | MedAgentBench memory cycle hyperparameters |
+| `MedAgentBench/configs/memory_cycle.yaml` | MedAgentBench sequential memory cycle |
+| `MedAgentBench/configs/batch_memory_cycle.yaml` | MedAgentBench batch memory cycle |
 | `MedAgentBench-v2/configs/skill_cycle.yaml` | MedAgentBench-v2 skill cycle hyperparameters |
-| `MedAgentBench-v2/configs/memory_cycle.yaml` | MedAgentBench-v2 memory cycle hyperparameters |
+| `MedAgentBench-v2/configs/memory_cycle.yaml` | MedAgentBench-v2 sequential memory cycle |
+| `MedAgentBench-v2/configs/batch_memory_cycle.yaml` | MedAgentBench-v2 batch memory cycle |
 | `FHIR-AgentBench/configs/skill_cycle.yaml` | FHIR-AgentBench native skill cycle hyperparameters |
-| `FHIR-AgentBench/configs/memory_cycle.yaml` | FHIR-AgentBench memory cycle hyperparameters |
+| `FHIR-AgentBench/configs/memory_cycle.yaml` | FHIR-AgentBench sequential memory cycle |
+| `FHIR-AgentBench/configs/batch_memory_cycle.yaml` | FHIR-AgentBench batch memory cycle |
 | `AgentBench/configs/agents/gemini-chat.yaml` | Vertex AI Gemini agent config |
 | `MedAgentBench/configs/agents/vertex-gemini.yaml` | Vertex AI Gemini agent config |
 
@@ -444,60 +475,6 @@ FHIR-AgentBench/skills/
 Learned skills are written to `outputs/<run>/skills/learned/` during training and loaded fresh on every inference call.
 
 Memory runs write bullets to `outputs/<run>/memory.md` and a `memory_log.jsonl` entry per update (batch index, bullets added, probe stats before and after).
-
----
-
-## Implementation plan: MedAgentBench-v2 and memory cycle
-
-### MedAgentBench-v2 (TODO)
-
-Create `MedAgentBench-v2/` as a standalone directory mirroring MedAgentBench's structure. Copy from MedAgentBench and make the following changes:
-
-1. **Data**: Copy `medagentbenchv2/medagentbench_v2/src/MedAgentBench/data/medagentbench/new_patient_tasks.json` to `MedAgentBench-v2/data/medagentbench/new_patient_tasks.json`. Write `split_dataset.py` with a 6/2/2 per-type split (180 dev / 60 val / 60 test).
-
-2. **Evaluator**: Copy `medagentbenchv2/medagentbench_v2/src/medagentbenchevals/new_refsol.py` to `MedAgentBench-v2/src/server/tasks/medagentbench/refsol.py` (rename to match the existing module import path). Update `eval.py` to route all 10 task categories to the new evaluator functions.
-
-3. **New tools**: Add `fhir_procedure_search` and `fhir_condition_search` to the agent tool set. Source the implementations from `medagentbenchv2/medagentbench_v2/src/tool/procedure_search.py` and `condition_search.py`, adapting them to the existing AgentBench-style tool interface. Register them in the agent config.
-
-4. **Config**: Write `configs/skill_cycle.yaml` and `configs/start_task.yaml` using port 5003/5004. Point data paths at `new_patient_tasks.json`.
-
-5. **Skill base**: Copy MedAgentBench's base skills as a starting point; update task descriptions in the skeleton to reflect the new clinical workflows.
-
-6. **Remove `medagentbenchv2/`**: Once MedAgentBench-v2 is self-contained, `medagentbenchv2/` can be deleted.
-
-### Memory cycle (TODO)
-
-Implement `memory_cycle.py` (or `src/memory_cycle.py` for AgentBench-style) in each of the four benchmarks. The implementation reuses the skill cycle's epoch/batch runner, failure classification, and probe/val evaluation. Only the update step differs:
-
-**`MemoryUpdater`** — wraps the existing `SkillUpdater` / `FHIRSkillUpdater`:
-- `synthesize_bullets(failure_traces, current_bullets) -> List[str]`: calls the updater LLM with a prompt requesting 1–3 correction bullets. Prompt instructs: start each bullet with "when...", keep it ≤ 2 sentences, do not repeat existing bullets.
-- Returns a plain list of strings (no validation step).
-
-**`MemoryAwareAgent`** — wraps the base agent:
-- Holds `bullets: List[str]` in memory.
-- At inference time, formats bullets as a `<memory>` block and prepends it to the system prompt (AgentBench/MedAgentBench) or injects it into the FHIR-AgentBench prompt builder.
-- `add_bullet(text)` appends and evicts oldest if over `max_bullets`.
-
-**Memory cycle loop** (per benchmark):
-```
-for each epoch:
-    for each batch:
-        run dev batch with MemoryAwareAgent
-        run probe with MemoryAwareAgent (log adjusted score for parity with skill logs)
-        classify failures -> synthesize bullets -> add to agent
-    run val with MemoryAwareAgent -> log val score
-```
-
-The probe run in the memory cycle is **logging-only** — it measures how much the latest bullet addition improved the probe, but it does not gate the update. This lets us plot "probe trajectory" comparably to skills while preserving the natural memory behavior.
-
-**Files to create per benchmark:**
-
-| Benchmark | Files |
-|---|---|
-| AgentBench | `src/memory_cycle.py`, `src/skills/memory_updater.py`, `src/client/agents/memory_aware_agent.py`, `configs/memory_cycle_{os,dbbench,ltp,card_game,alfworld}.yaml` |
-| MedAgentBench | `src/memory_cycle.py`, `src/skills/memory_updater.py`, `src/client/agents/memory_aware_agent.py`, `configs/memory_cycle.yaml` |
-| MedAgentBench-v2 | Same as MedAgentBench (inherited from copy) |
-| FHIR-AgentBench | `memory_cycle.py`, `skill_learning/memory_updater.py`, `configs/memory_cycle.yaml` |
 
 ---
 

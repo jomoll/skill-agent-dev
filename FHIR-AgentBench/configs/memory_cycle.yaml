@@ -1,0 +1,41 @@
+output_dir: "outputs/memory_cycle"
+
+agent:
+  strategy: "multi_turn_code_resource"
+  model: "openai/gpt-oss-120b"
+  base_url: "http://10.32.16.43:4000"
+  timeout: 20
+  max_retries: 3
+  verbose: false
+  enable_cache: true
+
+updater:
+  model: "openai/gpt-oss-120b"
+  base_url: "http://10.32.16.43:4000"
+  temperature: 0.7
+  max_tokens: 4096
+  timeout: 60
+  max_retries: 3
+
+eval:
+  model: "openai/gpt-oss-120b"
+  base_url: "http://10.32.16.43:4000"
+  timeout: 20
+  max_retries: 3
+
+data:
+  csv: "final_dataset/questions_answers_sql_fhir.csv"
+  dev_splits: ["train"]
+  val_splits: ["valid"]
+  dev_limit: 80
+  val_limit: 40
+
+memory:
+  max_bullets: 20
+
+# Match skill_cycle.yaml hyperparameters for a fair comparison
+cycle:
+  epochs: 5
+  update_every: 40
+  batch_concurrency: 4
+  run_baseline: true
