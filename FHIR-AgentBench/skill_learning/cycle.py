@@ -481,6 +481,9 @@ class FHIRSkillCycleRunner:
             self.skill_repo,
             update_cycle=update_cycle,
         )
+        baseline_error_ids = {
+            str(e.get("sample_id")) for e in baseline_entries if e.get("error")
+        }
         baseline_fixes, baseline_regressions = self._count_probe_transitions(
             baseline_entries, probe_failing_ids
         )
@@ -510,6 +513,7 @@ class FHIRSkillCycleRunner:
                     probe,
                     probe_failing_ids,
                     update_cycle,
+                    baseline_error_ids,
                 )
                 adjusted = (
                     (fixes - baseline_fixes)
@@ -570,6 +574,7 @@ class FHIRSkillCycleRunner:
                         probe,
                         probe_failing_ids,
                         update_cycle,
+                        baseline_error_ids,
                     )
                     adjusted = (
                         (fixes - baseline_fixes)
@@ -645,6 +650,7 @@ class FHIRSkillCycleRunner:
         probe: List[Dict],
         probe_failing_ids: set,
         update_cycle: int,
+        baseline_error_ids: set = frozenset(),
     ) -> Tuple[int, int, int, List[Dict]]:
         fork = self.skill_repo.fork()
         try:
@@ -657,11 +663,13 @@ class FHIRSkillCycleRunner:
             fixes, regressions = self._count_probe_transitions(
                 probe_entries,
                 probe_failing_ids,
+                baseline_error_ids,
             )
             regressed_traces = [
                 e for e in probe_entries
                 if str(e.get("sample_id")) not in probe_failing_ids
                 and not e.get("is_correct", False)
+                and not (e.get("error") and str(e.get("sample_id")) in baseline_error_ids)
             ]
             return fixes - regressions, fixes, regressions, regressed_traces
         finally:
@@ -669,16 +677,16 @@ class FHIRSkillCycleRunner:
 
     @staticmethod
     def _count_probe_transitions(
-        entries: List[Dict], probe_failing_ids: set
+        entries: List[Dict], probe_failing_ids: set, baseline_error_ids: set = frozenset()
     ) -> Tuple[int, int]:
         fixes = 0
         regressions = 0
         for entry in entries:
-            if entry.get("error"):
-                # Agent failed to produce parseable output — not attributable to
-                # skill quality, exclude from fix/regression accounting.
-                continue
             sample_id = str(entry.get("sample_id"))
+            if entry.get("error") and sample_id in baseline_error_ids:
+                # Same sample errored in the baseline probe too — pre-existing
+                # noise, not attributable to this skill candidate.
+                continue
             is_correct = bool(entry.get("is_correct"))
             was_failing = sample_id in probe_failing_ids
             if was_failing and is_correct:

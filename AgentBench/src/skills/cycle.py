@@ -727,7 +727,9 @@ class SkillCycleRunner:
             print("  [CollapseRecovery] no probe set available, skipping")
             return None
 
-        baseline_fixes, baseline_regressions = self._run_baseline_probe(probe_set, probe_failing_ids)
+        baseline_fixes, baseline_regressions, baseline_error_ids = self._run_baseline_probe(
+            probe_set, probe_failing_ids
+        )
 
         removal_proposal = {
             "action": "REMOVE",
@@ -737,7 +739,7 @@ class SkillCycleRunner:
         }
         try:
             _, fixes, regressions, invalid_regr, _ = self._eval_candidate(
-                removal_proposal, probe_set, probe_failing_ids
+                removal_proposal, probe_set, probe_failing_ids, baseline_error_ids
             )
             adjusted = (
                 (fixes - baseline_fixes)
@@ -806,7 +808,7 @@ class SkillCycleRunner:
               f"(out-of-sample from prior batches)")
 
         # Baseline probe: run with current skills to calibrate fix/regression counts
-        baseline_fixes, baseline_regressions = self._run_baseline_probe(
+        baseline_fixes, baseline_regressions, baseline_error_ids = self._run_baseline_probe(
             probe_set, probe_failing_ids
         )
 
@@ -880,7 +882,7 @@ class SkillCycleRunner:
         for proposal in proposal_iter:
             try:
                 raw_score, fixes, regressions, invalid_regr, regressed_traces = \
-                    self._eval_candidate(proposal, probe_set, probe_failing_ids)
+                    self._eval_candidate(proposal, probe_set, probe_failing_ids, baseline_error_ids)
             except Exception as e:
                 print(f"  [ProposalRanking] eval failed for "
                       f"{proposal.get('action')}::{proposal.get('name')}: {e}")
@@ -930,6 +932,7 @@ class SkillCycleRunner:
                 best_candidate, best_regressed_traces,
                 probe_set, probe_failing_ids,
                 baseline_fixes, baseline_regressions,
+                baseline_error_ids,
             )
             if revised is not None:
                 rev_candidate, rev_adjusted, rev_fixes, rev_regressions, rev_invalid = revised
@@ -978,12 +981,15 @@ class SkillCycleRunner:
         proposal: Dict,
         probe_set: List[Dict],
         probe_failing_ids: set,
+        baseline_error_ids: set = frozenset(),
     ) -> Tuple[int, int, int, int, List[Dict]]:
         """
         Fork the skill repo, apply proposal, run probe set.
         Returns (raw_score, fixes, regressions, invalid_action_regressions, regressed_traces).
         regressed_traces contains minimal log entries for samples that regressed,
         used by the contrastive revision step.
+        baseline_error_ids: sample IDs that errored in the baseline run — these are
+        excluded from regression counting to avoid penalising pre-existing task noise.
         """
         forked = self.skill_repo.fork()
         try:
@@ -1034,6 +1040,22 @@ class SkillCycleRunner:
                         continue
                     is_correct, status, agent_actions, history = probe_result
                     if status == "error":
+                        if sample["id"] in baseline_error_ids:
+                            # Pre-existing task error — not attributable to this proposal.
+                            continue
+                        # New error introduced by this candidate — treat as regression.
+                        was_failing = sample["id"] in probe_failing_ids
+                        if not was_failing:
+                            regressions += 1
+                            regressed_traces.append({
+                                "sample_id": sample["id"],
+                                "instruction": sample.get("description", ""),
+                                "is_correct": False,
+                                "status": status,
+                                "agent_actions": agent_actions,
+                                "history": history,
+                                "skill_snapshot_before": [],
+                            })
                         continue
                     was_failing = sample["id"] in probe_failing_ids
                     if was_failing and is_correct:
@@ -1065,15 +1087,17 @@ class SkillCycleRunner:
         self,
         probe_set: List[Dict],
         probe_failing_ids: set,
-    ) -> Tuple[int, int]:
+    ) -> Tuple[int, int, set]:
         """
         Run the probe set with the current (unmodified) skill library to get a
-        causal baseline. Returns (baseline_fixes, baseline_regressions).
-        Fixes/regressions here reflect what the current skills already do,
-        so candidate scores can be adjusted relative to this baseline.
+        causal baseline. Returns (baseline_fixes, baseline_regressions, baseline_error_ids).
+        baseline_error_ids is the set of sample IDs that produced task errors during
+        the baseline run — used to symmetrically exclude pre-existing errors from
+        candidate regression counting.
         """
         baseline_fixes = 0
         baseline_regressions = 0
+        baseline_error_ids: set = set()
 
         def run_one(sample):
             task_index = self._id_to_index[sample["id"]]
@@ -1099,6 +1123,11 @@ class SkillCycleRunner:
                     continue
                 is_correct, status = result_tuple
                 if status == "error":
+                    baseline_error_ids.add(sample["id"])
+                    # Errors count as wrong — register regression if previously passing
+                    was_failing = sample["id"] in probe_failing_ids
+                    if not was_failing:
+                        baseline_regressions += 1
                     continue
                 was_failing = sample["id"] in probe_failing_ids
                 if was_failing and is_correct:
@@ -1109,7 +1138,7 @@ class SkillCycleRunner:
         print(f"  [ProposalRanking] baseline probe: "
               f"{baseline_fixes} fixes, {baseline_regressions} regressions "
               f"(current skills, no proposal)")
-        return baseline_fixes, baseline_regressions
+        return baseline_fixes, baseline_regressions, baseline_error_ids
 
     def _contrastive_revision(
         self,
@@ -1119,6 +1148,7 @@ class SkillCycleRunner:
         probe_failing_ids: set,
         baseline_fixes: int,
         baseline_regressions: int,
+        baseline_error_ids: set = frozenset(),
     ) -> Optional[Tuple[Dict, int, int, int, int]]:
         """
         Ask the updater to revise the winning proposal to avoid regressions,
@@ -1141,7 +1171,7 @@ class SkillCycleRunner:
         revision = validated[0]
         try:
             raw_score, fixes, regressions, invalid_regr, _ = self._eval_candidate(
-                revision, probe_set, probe_failing_ids
+                revision, probe_set, probe_failing_ids, baseline_error_ids
             )
             adjusted = (
                 (fixes - baseline_fixes)

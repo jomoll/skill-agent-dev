@@ -1,0 +1,38 @@
+output_dir: "outputs/skill_cycle"
+
+# Agent used for both task execution and skill updates
+agent:
+  module: src.client.agents.VertexAgent
+  parameters:
+    project_id: "gen-lang-client-0167970622"
+    location: "us-central1"
+    model: "gemini-3.1-flash-lite-preview"
+    temperature: 0.2
+    max_output_tokens: 32768
+
+# Task worker (must be running before starting this script)
+task:
+  name: "medagentbench-v2-skill"
+  controller_address: "http://localhost:5070/api"
+  fhir_api_base: "http://localhost:8080/fhir/"
+
+# Data splits produced by data/medagentbench/split_dataset.py
+data:
+  full: "data/medagentbench/new_patient_tasks.json"
+  dev:  "data/medagentbench/split_dev.json"
+  val:  "data/medagentbench/split_val.json"
+
+# Skill library
+skills:
+  base_dir: "skills/base"
+
+# Training loop hyperparameters
+cycle:
+  epochs: 5
+  update_every: 30      # batch size per skill update cycle
+  batch_concurrency: 5  # parallel samples within a batch (must be <= task worker concurrency)
+  max_proposals: 1      # one change per proposal (best-of-K grouped proposal ranking selects the winner)
+  max_learned_skills: 10
+  grpo_k: 4             # number of candidate proposals to sample per update
+  grpo_eval_n: 20       # probe set size for grouped proposal ranking: grpo_eval_n/2 failing + grpo_eval_n/2 passing
+  run_baseline: false   # set to true to run a silent val eval before epoch 0

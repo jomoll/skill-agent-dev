@@ -12,6 +12,10 @@ venv/
 # Outputs (experiment results — too large for version control)
 AgentBench/outputs/
 MedAgentBench/outputs/
+MedAgentBench-v2/outputs/
+
+# Upstream fork — replaced by standalone MedAgentBench-v2/
+medagentbenchv2/
 
 # IDE
 .idea/
