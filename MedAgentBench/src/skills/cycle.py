@@ -397,6 +397,7 @@ class SkillCycleRunner:
 
         # Val learning-curve log
         self._val_scores_path = self.run_dir / "val_scores.json"
+        self.resume: bool = bool(config.get("_resume", False))
 
         # Best-checkpoint tracking: snapshot learned/ whenever val improves
         self._best_val_score: float = 0.0
@@ -444,17 +445,43 @@ class SkillCycleRunner:
 
     def _run_inner(self) -> None:
         if self.run_baseline:
-            print(f"\n{'='*60}")
-            print(f"  BASELINE (before epoch 0)")
-            print(f"{'='*60}")
             baseline_dir = self.run_dir / "baseline"
-            baseline_dir.mkdir(exist_ok=True)
-            baseline_score = self._evaluate_val(epoch="baseline", epoch_dir=baseline_dir)
-            print(f"[Baseline] Val: {baseline_score:.1%}")
-            self._maybe_update_best_checkpoint(baseline_score, "baseline")
+            baseline_score_path = baseline_dir / "val_score.json"
+            if self.resume and baseline_score_path.exists():
+                try:
+                    s = json.loads(baseline_score_path.read_text(encoding="utf-8"))["score"]
+                    print(f"[Resume] Baseline already done (val={s:.1%}), skipping")
+                    if s > self._best_val_score:
+                        self._best_val_score = s
+                        self._best_checkpoint_label = "baseline"
+                except Exception:
+                    pass
+            else:
+                print(f"\n{'='*60}")
+                print(f"  BASELINE (before epoch 0)")
+                print(f"{'='*60}")
+                baseline_dir.mkdir(exist_ok=True)
+                baseline_score = self._evaluate_val(epoch="baseline", epoch_dir=baseline_dir)
+                print(f"[Baseline] Val: {baseline_score:.1%}")
+                self._maybe_update_best_checkpoint(baseline_score, "baseline")
 
         prev_taxonomy: Dict[str, str] = {}
         for epoch in range(self.epochs):
+            epoch_dir = self.run_dir / f"epoch_{epoch}"
+            val_score_path = epoch_dir / "val_score.json"
+            if self.resume and val_score_path.exists():
+                try:
+                    s = json.loads(val_score_path.read_text(encoding="utf-8"))["score"]
+                    print(f"[Resume] Epoch {epoch} already done (val={s:.1%}), skipping")
+                    taxonomy_path = epoch_dir / "failure_taxonomy.json"
+                    if taxonomy_path.exists():
+                        prev_taxonomy = json.loads(taxonomy_path.read_text(encoding="utf-8"))
+                    if s > self._best_val_score:
+                        self._best_val_score = s
+                        self._best_checkpoint_label = epoch
+                except Exception:
+                    pass
+                continue
             print(f"\n{'='*60}")
             print(f"  EPOCH {epoch}")
             print(f"{'='*60}")

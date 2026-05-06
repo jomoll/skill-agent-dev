@@ -13,7 +13,7 @@ agent:
 # Task worker (must be running before starting this script)
 task:
   name: "medagentbench-std"
-  controller_address: "http://localhost:5001/api"
+  controller_address: "http://localhost:5050/api"
   fhir_api_base: "http://localhost:8080/fhir/"
 
 # Data splits produced by data/medagentbench/split_dataset.py

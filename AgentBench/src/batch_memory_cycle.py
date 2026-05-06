@@ -21,7 +21,14 @@ def main():
     parser.add_argument("--config", "-c", type=str, default="configs/batch_memory_cycle_os.yaml")
     parser.add_argument("--run-name", "-n", type=str, default=None)
     parser.add_argument("--force", "-f", action="store_true")
+    parser.add_argument(
+        "--resume", "-r", action="store_true",
+        help="Continue an interrupted run, skipping already-completed epochs",
+    )
     args = parser.parse_args()
+    if args.force and args.resume:
+        print("--force and --resume are mutually exclusive.", file=sys.stderr)
+        sys.exit(1)
 
     config_path = Path(args.config)
     if not config_path.exists():
@@ -34,12 +41,13 @@ def main():
     output_dir = Path(config.get("output_dir", "outputs/batch_memory_cycle"))
     run_dir = output_dir / run_name
 
-    if run_dir.exists() and not args.force:
-        print(f"Run directory already exists: {run_dir}\nUse --force to overwrite.",
+    if run_dir.exists() and not args.force and not args.resume:
+        print(f"Run directory already exists: {run_dir}\nUse --resume to continue or --force to overwrite.",
               file=sys.stderr)
         sys.exit(1)
 
     run_dir.mkdir(parents=True, exist_ok=True)
+    config["_resume"] = args.resume
     print(f"Run directory: {run_dir}")
 
     with open(run_dir / "config.yaml", "w") as f:

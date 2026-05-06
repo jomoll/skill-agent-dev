@@ -137,6 +137,9 @@ class FHIRSkillCycleRunner:
         self.run_baseline = bool(cycle_cfg.get("run_baseline", True))
         self.max_proposals = int(cycle_cfg.get("max_proposals", 1))
         self.max_learned_skills = int(cycle_cfg.get("max_learned_skills", 10))
+        self.non_learnable_labels = [
+            s.lower() for s in cycle_cfg.get("non_learnable_labels", [])
+        ]
 
         data_cfg = config["data"]
         csv_path = Path(data_cfg["csv"])
@@ -380,6 +383,38 @@ class FHIRSkillCycleRunner:
             return None
 
         sample_to_label, new_labels = self.updater.classify_failures(failing, prev_taxonomy)
+
+        # Drop infrastructure failures (timeouts, runner crashes, service errors) so the
+        # updater never wastes proposals on things that aren't skill gaps.
+        if self.non_learnable_labels:
+            learnable_failing = [
+                e for e in failing
+                if not any(
+                    pat in sample_to_label.get(str(e.get("sample_id", "")), "").lower()
+                    for pat in self.non_learnable_labels
+                )
+            ]
+            n_skipped = len(failing) - len(learnable_failing)
+            if n_skipped:
+                learnable_ids = {str(e.get("sample_id", "")) for e in learnable_failing}
+                sample_to_label = {
+                    sid: lbl for sid, lbl in sample_to_label.items() if sid in learnable_ids
+                }
+                print(f"  [SkillFilter] excluded {n_skipped} non-learnable failures from proposal pool")
+                failing = learnable_failing
+            if not failing:
+                print("  No learnable failures after filtering; skipping update.")
+                event = {
+                    "epoch": epoch,
+                    "update_cycle": update_cycle,
+                    "new_failure_labels": new_labels,
+                    "applied": [],
+                    "raw_proposals": [],
+                    "grpo": [],
+                    "reason": "all_failures_non_learnable",
+                }
+                return event
+
         diagnosis = self.updater.diagnose(failing, self.skill_repo, failure_labels=sample_to_label)
         effectiveness = _compute_skill_effectiveness(all_entries, prev_results)
 
@@ -392,7 +427,14 @@ class FHIRSkillCycleRunner:
             "grpo": [],
         }
 
-        proposal_groups = self._group_entries_by_failure_mode(batch_entries, sample_to_label)
+        # Only include learnable failing entries in proposal groups so non-learnable
+        # failures don't become an "unlabeled" group that wastes proposal budget.
+        _learnable_ids = {str(e.get("sample_id", "")) for e in failing}
+        _batch_for_proposals = [
+            e for e in batch_entries
+            if e.get("is_correct") or str(e.get("sample_id", "")) in _learnable_ids
+        ]
+        proposal_groups = self._group_entries_by_failure_mode(_batch_for_proposals, sample_to_label)
         print(
             "  [ProposalRanking] failure groups: "
             + ", ".join(f"{label}({len(entries)})" for label, entries in proposal_groups)

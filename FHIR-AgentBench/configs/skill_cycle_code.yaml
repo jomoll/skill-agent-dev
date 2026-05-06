@@ -1,10 +1,10 @@
-output_dir: "outputs/skill_cycle"
+output_dir: "outputs/skill_cycle_code"
 
 agent:
   strategy: "multi_turn_code_resource"
   model: "openai/gpt-oss-120b"
   base_url: "http://10.32.16.43:4000"
-  timeout: 20
+  timeout: 60
   max_retries: 3
   verbose: false
   enable_cache: true
@@ -20,15 +20,15 @@ updater:
 eval:
   model: "openai/gpt-oss-120b"
   base_url: "http://10.32.16.43:4000"
-  timeout: 20
+  timeout: 60
   max_retries: 3
 
 data:
   csv: "final_dataset/questions_answers_sql_fhir.csv"
   dev_splits: ["train"]
   val_splits: ["valid"]
-  dev_limit: 80
-  val_limit: 40
+  dev_limit: 120
+  val_limit: 80
 
 skills:
   base_dir: "skills/base"
@@ -36,9 +36,10 @@ skills:
 cycle:
   epochs: 5
   update_every: 40
-  batch_concurrency: 4
+  batch_concurrency: 8
   max_proposals: 1
   max_learned_skills: 10
   grpo_k: 4
   grpo_eval_n: 30
   run_baseline: true
+  non_learnable_labels: ["timeout", "runner_error", "service_unavailable"]

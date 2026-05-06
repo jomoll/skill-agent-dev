@@ -36,7 +36,14 @@ def main():
         "--force", "-f", action="store_true",
         help="Overwrite an existing run directory",
     )
+    parser.add_argument(
+        "--resume", "-r", action="store_true",
+        help="Continue an interrupted run, skipping already-completed epochs",
+    )
     args = parser.parse_args()
+    if args.force and args.resume:
+        print("--force and --resume are mutually exclusive.", file=sys.stderr)
+        sys.exit(1)
 
     config_path = Path(args.config)
     if not config_path.exists():
@@ -49,15 +56,16 @@ def main():
     output_dir = Path(config.get("output_dir", "outputs/skill_cycle"))
     run_dir = output_dir / run_name
 
-    if run_dir.exists() and not args.force:
+    if run_dir.exists() and not args.force and not args.resume:
         print(
             f"Run directory already exists: {run_dir}\n"
-            "Use --force to overwrite.",
+            "Use --resume to continue or --force to overwrite.",
             file=sys.stderr,
         )
         sys.exit(1)
 
     run_dir.mkdir(parents=True, exist_ok=True)
+    config["_resume"] = args.resume
     print(f"Run directory: {run_dir}")
 
     with open(run_dir / "config.yaml", "w") as f:

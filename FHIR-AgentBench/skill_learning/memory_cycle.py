@@ -327,6 +327,7 @@ class FHIRBatchMemoryCycleRunner:
         self._best_checkpoint_label: Any = None
         self._best_memory_path: Path = self.run_dir / "memory" / "best.json"
         self._progress_stream = None
+        self.resume: bool = bool(config.get("_resume", False))
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -412,19 +413,55 @@ class FHIRBatchMemoryCycleRunner:
     def _run_inner(self) -> None:
         print(f"[FHIRMemoryCycle] dev={len(self.dev_data)} val={len(self.val_data)}")
 
-        val_scores = []
+        val_scores_path = self.run_dir / "val_scores.json"
+        val_scores: List[Dict] = []
+        if self.resume and val_scores_path.exists():
+            try:
+                val_scores = json.loads(val_scores_path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+
         if self.run_baseline:
             baseline_dir = self.run_dir / "baseline"
-            baseline_dir.mkdir(exist_ok=True)
-            score = self._evaluate_split(self.val_data, baseline_dir / "val_runs.jsonl", update_cycle=-1)
-            print(f"[Baseline] Val: {score:.1%}")
-            val_scores.append({"epoch": -1, "score": score})
-            (self.run_dir / "val_scores.json").write_text(json.dumps(val_scores, indent=2), encoding="utf-8")
-            self._maybe_update_best_checkpoint(score, "baseline")
+            baseline_score_path = baseline_dir / "val_score.json"
+            if self.resume and baseline_score_path.exists():
+                try:
+                    s = json.loads(baseline_score_path.read_text(encoding="utf-8"))["score"]
+                    print(f"[Resume] Baseline already done (val={s:.1%}), skipping")
+                    if not any(e["epoch"] == -1 for e in val_scores):
+                        val_scores.insert(0, {"epoch": -1, "score": s})
+                    if s > self._best_val_score:
+                        self._best_val_score = s
+                        self._best_checkpoint_label = "baseline"
+                except Exception:
+                    pass
+            else:
+                baseline_dir.mkdir(exist_ok=True)
+                score = self._evaluate_split(self.val_data, baseline_dir / "val_runs.jsonl", update_cycle=-1)
+                print(f"[Baseline] Val: {score:.1%}")
+                val_scores.append({"epoch": -1, "score": score})
+                (baseline_dir / "val_score.json").write_text(
+                    json.dumps({"epoch": -1, "score": score}, indent=2), encoding="utf-8"
+                )
+                val_scores_path.write_text(json.dumps(val_scores, indent=2), encoding="utf-8")
+                self._maybe_update_best_checkpoint(score, "baseline")
 
         for epoch in range(self.epochs):
-            print(f"\n{'='*60}\n  EPOCH {epoch}\n{'='*60}")
             epoch_dir = self.run_dir / f"epoch_{epoch}"
+            val_score_path = epoch_dir / "val_score.json"
+            if self.resume and val_score_path.exists():
+                try:
+                    s = json.loads(val_score_path.read_text(encoding="utf-8"))["score"]
+                    print(f"[Resume] Epoch {epoch} already done (val={s:.1%}), skipping")
+                    if not any(e["epoch"] == epoch for e in val_scores):
+                        val_scores.append({"epoch": epoch, "score": s})
+                    if s > self._best_val_score:
+                        self._best_val_score = s
+                        self._best_checkpoint_label = epoch
+                except Exception:
+                    pass
+                continue
+            print(f"\n{'='*60}\n  EPOCH {epoch}\n{'='*60}")
             epoch_dir.mkdir(exist_ok=True)
             entries = self._run_epoch(epoch, epoch_dir)
             val_score = self._evaluate_split(self.val_data, epoch_dir / "val_runs.jsonl", update_cycle=epoch)
@@ -432,7 +469,7 @@ class FHIRBatchMemoryCycleRunner:
             (epoch_dir / "val_score.json").write_text(
                 json.dumps({"epoch": epoch, "score": val_score}, indent=2), encoding="utf-8"
             )
-            (self.run_dir / "val_scores.json").write_text(json.dumps(val_scores, indent=2), encoding="utf-8")
+            val_scores_path.write_text(json.dumps(val_scores, indent=2), encoding="utf-8")
             print(f"[Epoch {epoch}] Val: {val_score:.1%}")
             self._maybe_update_best_checkpoint(val_score, epoch)
 

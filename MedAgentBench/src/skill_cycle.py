@@ -34,7 +34,14 @@ def main():
         "--force", "-f", action="store_true",
         help="Overwrite an existing run directory",
     )
+    parser.add_argument(
+        "--resume", "-r", action="store_true",
+        help="Continue an interrupted run, skipping already-completed epochs",
+    )
     args = parser.parse_args()
+    if args.force and args.resume:
+        print("--force and --resume are mutually exclusive.", file=sys.stderr)
+        sys.exit(1)
 
     # Load config
     config_path = Path(args.config)
@@ -58,6 +65,7 @@ def main():
         sys.exit(1)
 
     run_dir.mkdir(parents=True, exist_ok=True)
+    config["_resume"] = args.resume
     print(f"Run directory: {run_dir}")
 
     # Snapshot config into run dir
