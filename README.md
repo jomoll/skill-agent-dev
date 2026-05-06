@@ -310,7 +310,7 @@ cycled over the largest failure modes, and each validated proposal is ranked on
 the same probe set against current-skill baseline fixes/regressions before a
 single winner is applied.
 
-### Evaluating with a manual skill pack
+### Evaluating with a manual skill pack (AgentBench)
 
 To run a fixed set of skills against a split (useful as an upper-bound reference):
 
@@ -318,6 +318,41 @@ To run a fixed set of skills against a split (useful as an upper-bound reference
 cd AgentBench
 python -m src.run_manual_skills --config configs/manual_skills_dbbench.yaml --split val
 ```
+
+### Evaluating on the held-out test set (MedAgentBench and MedAgentBench-v2)
+
+`src/run_eval.py` evaluates either the base agent (no learned skills) or a saved skill pack against any split. Use this after a skill cycle run to get test-set numbers.
+
+```bash
+# MedAgentBench
+cd MedAgentBench && conda activate medagentbench
+
+# Base agent on test set
+python -m src.run_eval --config configs/skill_cycle.yaml --split test --run-name base_test
+
+# Best skills from a completed run on test set
+python -m src.run_eval --config configs/skill_cycle.yaml --split test \
+    --skills-dir outputs/skill_cycle/run_001/skills/best --run-name run_001_best_test
+```
+
+```bash
+# MedAgentBench-v2
+cd MedAgentBench-v2 && conda activate medagentbench
+
+# Base agent on test set
+python -m src.run_eval --config configs/skill_cycle.yaml --split test --run-name base_test
+
+# Best skills from a completed run on test set
+python -m src.run_eval --config configs/skill_cycle.yaml --split test \
+    --skills-dir outputs/skill_cycle/run_001/skills/best --run-name run_001_best_test
+```
+
+The task worker must be running before invoking `run_eval.py` (same startup as the skill cycle). Results are written to `outputs/eval/<run-name>/`:
+
+- `test_runs.jsonl` — per-sample correctness and task result
+- `test_score.json` — summary `{split, score, n_correct, n_total, skills_dir}`
+
+`--split` accepts `dev`, `val`, or `test`. Omit `--skills-dir` for the base agent; pass a path to any `skills/learned/` or `skills/best/` directory for a skills-equipped agent. Use `--force` to overwrite an existing run directory.
 
 ---
 
