@@ -50,3 +50,5 @@ AgentBench/config.sh
 AgentBench/src/tasks/humaneval_x/env/vendor
 AgentBench/src/server/tasks/card_game/result
 logs
+
+Evo-MedAgent/

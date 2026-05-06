@@ -31,6 +31,15 @@ Output is plain prose starting with `"when asked ..."` — task-specific conditi
 
 **`batch_memory_cycle`** — parallel batches of `update_every` samples; memory updated once per batch from all failing traces in that batch. Matches our skill cycle's batch cadence for a direct apples-to-apples comparison. Memory notes use the same paper-style prompt but process multiple failing entries per update call (one LLM call per entry).
 
+**`evo_memory_cycle`** — Evo-Memory-style structured memory comparator. Instead of appending all notes into one prompt, it maintains two stores: episodic memories of completed task attempts and a compact semantic cheatsheet of reusable procedural rules. At inference time it retrieves only top-k relevant rules/episodes; after each dev episode, a curator LLM reflects with eval feedback, updates the stores, and tracks rule utility (`shown`, `success`, `failure`). There is no probe acceptance gate — this tests retrieval and utility-tracked memory curation against validated skill writing.
+
+| Comparator | Learned artifact | Update source | Selection mechanism |
+|---|---|---|---|
+| `skill_cycle` | Markdown skills | Failure traces | Probe-scored fixes minus regressions |
+| `memory_cycle` | Flat correction notes | Individual failures | Append all |
+| `batch_memory_cycle` | Flat correction notes | Batch failures | Append all |
+| `evo_memory_cycle` | Episodic examples + semantic rules | Completed dev episodes with eval feedback | Top-k retrieval + rule utility |
+
 ---
 
 ## Setup
@@ -346,11 +355,32 @@ python -m src.batch_memory_cycle --config configs/batch_memory_cycle.yaml --run-
 python batch_memory_cycle.py --config configs/batch_memory_cycle.yaml --run-name mem_001
 ```
 
+### Evo memory cycle
+
+```bash
+# AgentBench
+python -m src.evo_memory_cycle --config configs/evo_memory_cycle_os.yaml --run-name evo_001
+python -m src.evo_memory_cycle --config configs/evo_memory_cycle_dbbench.yaml --run-name evo_001
+python -m src.evo_memory_cycle --config configs/evo_memory_cycle_ltp.yaml --run-name evo_001
+python -m src.evo_memory_cycle --config configs/evo_memory_cycle_card_game.yaml --run-name evo_001
+python -m src.evo_memory_cycle --config configs/evo_memory_cycle_alfworld.yaml --run-name evo_001
+
+# MedAgentBench
+python -m src.evo_memory_cycle --config configs/evo_memory_cycle.yaml --run-name evo_001
+
+# MedAgentBench-v2
+python -m src.evo_memory_cycle --config configs/evo_memory_cycle.yaml --run-name evo_001
+
+# FHIR-AgentBench
+python evo_memory_cycle.py --config configs/evo_memory_cycle.yaml --run-name evo_001
+```
+
 **Design principles for a fair comparison:**
 - Same base agent and updater model as the skill cycle — no enhanced system prompt, no additional tools
 - Same dev/val splits and val evaluation
 - Memory notes appended unconditionally (no probe-based acceptance gate) — the gate is one of the variables under test
 - Val score tracked identically, enabling direct learning-curve comparison
+- Evo memory also avoids the probe gate; its distinct variable is retrieved structured memory with utility-tracked semantic rules
 
 **Implementation across benchmarks:**
 
@@ -358,6 +388,11 @@ python batch_memory_cycle.py --config configs/batch_memory_cycle.yaml --run-name
 |---|---|---|---|
 | AgentBench / MedAgentBench / MedAgentBench-v2 | `MemoryAwareAgent` wrapping base agent | `memory.json` (flat JSON list) injected as `<memory>` block | One LLM call per failing sample, paper prompt format |
 | FHIR-AgentBench | Memory block prepended to agent `system_msg` per run | `memory.json` in run dir | Same paper prompt format |
+
+| Benchmark | Evo memory agent | Evo storage | Retrieval/update |
+|---|---|---|---|
+| AgentBench / MedAgentBench / MedAgentBench-v2 | `EvoMemoryAwareAgent` wrapping base agent | `evo_memory/episodic.jsonl`, `evo_memory/semantic.json` | Lexical top-k retrieval + curator reflection after each dev episode |
+| FHIR-AgentBench | Native system-prompt wrapper | same | Native runner integration with the same curator schema |
 
 The `update_every` and `batch_concurrency` keys are used only by the batch variant; the sequential variant ignores `update_every` (updates after every failure) but still uses `batch_concurrency` for parallelised val evaluation. Memory grows unbounded — no condensing, matching the original paper.
 
@@ -433,15 +468,19 @@ Key config files:
 | `AgentBench/configs/memory_cycle_dbbench.yaml` | DBBench sequential memory cycle |
 | `AgentBench/configs/batch_memory_cycle_os.yaml` | OS batch memory cycle |
 | `AgentBench/configs/batch_memory_cycle_dbbench.yaml` | DBBench batch memory cycle |
+| `AgentBench/configs/evo_memory_cycle_*.yaml` | Evo-style structured memory comparators |
 | `MedAgentBench/configs/skill_cycle.yaml` | MedAgentBench skill cycle hyperparameters |
 | `MedAgentBench/configs/memory_cycle.yaml` | MedAgentBench sequential memory cycle |
 | `MedAgentBench/configs/batch_memory_cycle.yaml` | MedAgentBench batch memory cycle |
+| `MedAgentBench/configs/evo_memory_cycle.yaml` | MedAgentBench Evo memory comparator |
 | `MedAgentBench-v2/configs/skill_cycle.yaml` | MedAgentBench-v2 skill cycle hyperparameters |
 | `MedAgentBench-v2/configs/memory_cycle.yaml` | MedAgentBench-v2 sequential memory cycle |
 | `MedAgentBench-v2/configs/batch_memory_cycle.yaml` | MedAgentBench-v2 batch memory cycle |
+| `MedAgentBench-v2/configs/evo_memory_cycle.yaml` | MedAgentBench-v2 Evo memory comparator |
 | `FHIR-AgentBench/configs/skill_cycle.yaml` | FHIR-AgentBench native skill cycle hyperparameters |
 | `FHIR-AgentBench/configs/memory_cycle.yaml` | FHIR-AgentBench sequential memory cycle |
 | `FHIR-AgentBench/configs/batch_memory_cycle.yaml` | FHIR-AgentBench batch memory cycle |
+| `FHIR-AgentBench/configs/evo_memory_cycle.yaml` | FHIR-AgentBench Evo memory comparator |
 | `AgentBench/configs/agents/gemini-chat.yaml` | Vertex AI Gemini agent config |
 | `MedAgentBench/configs/agents/vertex-gemini.yaml` | Vertex AI Gemini agent config |
 
@@ -475,6 +514,8 @@ FHIR-AgentBench/skills/
 Learned skills are written to `outputs/<run>/skills/learned/` during training and loaded fresh on every inference call.
 
 Memory runs write bullets to `outputs/<run>/memory.md` and a `memory_log.jsonl` entry per update (batch index, bullets added, probe stats before and after).
+
+Evo memory runs write structured stores to `outputs/<run>/evo_memory/episodic.jsonl` and `outputs/<run>/evo_memory/semantic.json`; per-episode curator updates are logged under each epoch as `evo_memory_updates.json`.
 
 ---
 

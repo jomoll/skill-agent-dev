@@ -1,0 +1,66 @@
+output_dir: "outputs/evo_memory_cycle_os"
+
+# Agent using local vLLM endpoint (same config as skill_cycle_os.yaml)
+agent:
+  module: src.client.agents.HTTPAgent
+  parameters:
+    url: "http://10.32.16.43:4000/chat/completions"
+    headers:
+      Authorization: "Bearer sk--jYBY-YIx5jNQqR0LPgqdQ"
+      Content-Type: "application/json"
+    body:
+      model: "gpt-oss-120b"
+      temperature: 0.0
+      max_tokens: 8192
+    prompter:
+      name: role_content_dict
+      args:
+        agent_role: "assistant"
+
+# Updater uses same endpoint at higher temperature for diverse bullets
+updater:
+  module: src.client.agents.HTTPAgent
+  parameters:
+    url: "http://10.32.16.43:4000/chat/completions"
+    headers:
+      Authorization: "Bearer sk--jYBY-YIx5jNQqR0LPgqdQ"
+      Content-Type: "application/json"
+    body:
+      model: "gpt-oss-120b"
+      temperature: 0.7
+      max_tokens: 4096
+    prompter:
+      name: role_content_dict
+      args:
+        agent_role: "assistant"
+
+# Task worker (must be running before starting this script)
+task:
+  name: "os-std"
+  controller_address: "http://localhost:5040/api"
+
+# Task-specific eval function
+eval:
+  module: src.server.tasks.os_interaction.eval
+
+# Data splits
+data:
+  dev: "data/os_interaction/split_dev.json"
+  val: "data/os_interaction/split_val.json"
+
+# Evo memory hyperparameters
+evo_memory:
+  episodic_enabled: true
+  semantic_enabled: true
+  episodic_top_k: 3
+  semantic_top_k: 8
+  max_episodes: 500
+  max_semantic_rules: 25
+  max_context_chars: 6000
+
+# Training loop hyperparameters (match skill_cycle_os.yaml)
+cycle:
+  epochs: 5
+  update_every: 40
+  batch_concurrency: 8
+  run_baseline: true

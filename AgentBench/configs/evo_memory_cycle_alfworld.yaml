@@ -1,0 +1,59 @@
+output_dir: "outputs/evo_memory_cycle_alfworld"
+
+agent:
+  module: src.client.agents.HTTPAgent
+  parameters:
+    url: "http://10.32.16.43:4000/chat/completions"
+    headers:
+      Authorization: "Bearer sk--jYBY-YIx5jNQqR0LPgqdQ"
+      Content-Type: "application/json"
+    body:
+      model: "gpt-oss-120b"
+      temperature: 0.2
+      max_tokens: 8192
+    prompter:
+      name: role_content_dict
+      args:
+        agent_role: "assistant"
+
+updater:
+  module: src.client.agents.HTTPAgent
+  parameters:
+    url: "http://10.32.16.43:4000/chat/completions"
+    headers:
+      Authorization: "Bearer sk--jYBY-YIx5jNQqR0LPgqdQ"
+      Content-Type: "application/json"
+    body:
+      model: "gpt-oss-120b"
+      temperature: 0.7
+      max_tokens: 4096
+    prompter:
+      name: role_content_dict
+      args:
+        agent_role: "assistant"
+
+task:
+  name: "alfworld-skill"
+  controller_address: "http://localhost:5060/api"
+
+data:
+  dev: "data/alfworld/split_dev.json"
+  val: "data/alfworld/split_val.json"
+
+eval:
+  module: src.server.tasks.alfworld.eval
+
+evo_memory:
+  episodic_enabled: true
+  semantic_enabled: true
+  episodic_top_k: 3
+  semantic_top_k: 8
+  max_episodes: 500
+  max_semantic_rules: 25
+  max_context_chars: 6000
+
+cycle:
+  epochs: 5
+  update_every: 26
+  batch_concurrency: 1
+  run_baseline: true
