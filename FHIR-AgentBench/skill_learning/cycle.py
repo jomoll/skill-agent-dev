@@ -114,7 +114,7 @@ class FHIRSkillCycleRunner:
             model=updater_cfg.get("model", self.agent_model),
             base_url=updater_cfg.get("base_url", self.agent_base_url),
             temperature=float(updater_cfg.get("temperature", 0.0)),
-            max_tokens=int(updater_cfg.get("max_tokens", 32000)),
+            max_tokens=int(updater_cfg.get("max_tokens", 128000)),
             timeout=int(updater_cfg.get("timeout", 20)),
             max_retries=int(updater_cfg.get("max_retries", 3)),
         )

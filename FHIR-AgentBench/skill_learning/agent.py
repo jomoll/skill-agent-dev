@@ -70,7 +70,7 @@ class LiteLLMAgent:
         model: str,
         base_url: Optional[str] = None,
         temperature: float = 0.0,
-        max_tokens: int = 32000,
+        max_tokens: int = 128000,
         timeout: int = 20,
         max_retries: int = 3,
     ) -> None:

@@ -578,7 +578,7 @@ def safe_llm_call(
     temperature=0.0,
     parallel_tool_calls=True,
     max_retries=3,
-    max_tokens=32000,
+    max_tokens=128000,
     base_url=None,
     timeout=20,
 ):
