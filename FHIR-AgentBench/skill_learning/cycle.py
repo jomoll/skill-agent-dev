@@ -595,7 +595,10 @@ class FHIRSkillCycleRunner:
                 best_regressed_traces = regressed_traces
 
         if best is None:
-            print("  [ProposalRanking] no proposal improved adjusted score — applying nothing")
+            print(
+                "  [ProposalRanking] no proposal met acceptance criteria "
+                "(adjusted > 0 and regressions <= baseline regressions) — applying nothing"
+            )
             event["raw_proposals"] = raw_proposals
             event["grpo"] = candidate_logs
             event["baseline_fixes"] = baseline_fixes
@@ -651,8 +654,10 @@ class FHIRSkillCycleRunner:
                         best_stats = (fixes, regressions)
                     else:
                         print(
-                            f"  [ContrastiveRevision] revision did not improve "
-                            f"({adjusted:+d} <= {best_adjusted:+d}), keeping original"
+                            "  [ContrastiveRevision] revision did not meet acceptance criteria "
+                            f"(adjusted={adjusted:+d}, best={best_adjusted:+d}, "
+                            f"regressions={regressions}, baseline_regressions={baseline_regressions}), "
+                            "keeping original"
                         )
                 except Exception as e:
                     print(f"  [ContrastiveRevision] eval failed: {e}")

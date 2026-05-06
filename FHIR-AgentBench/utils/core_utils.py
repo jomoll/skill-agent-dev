@@ -585,7 +585,8 @@ def safe_llm_call(
     """Safe LLM API call with context length validation and retry logic."""
 
     if model.startswith("vertex_ai/") and not base_url:
-        vertex_max_retries = min(max_retries, 3)
+        vertex_max_retries = max_retries
+        base_delay = 5
         for attempt in range(vertex_max_retries):
             try:
                 return _vertex_ai_complete(
@@ -597,12 +598,26 @@ def safe_llm_call(
                     timeout=timeout,
                 )
             except Exception as e:
-                if "400 Client Error" in str(e) or "Bad Request" in str(e):
+                error_text = str(e)
+                if "400 Client Error" in error_text or "Bad Request" in error_text:
                     return None, f"BadRequestError: {e}", None
+                if (
+                    "429 Client Error" in error_text
+                    or "Too Many Requests" in error_text
+                    or "RESOURCE_EXHAUSTED" in error_text
+                ):
+                    delay = min(base_delay * (2 ** attempt), 60)
+                    jitter = delay * 0.2 * (0.5 - time.time() % 1)
+                    wait_time = delay + jitter
+                    print(f"Rate limited (attempt {attempt + 1}/{vertex_max_retries}), waiting {wait_time:.1f}s...")
+                    time.sleep(wait_time)
+                    continue
                 if attempt < vertex_max_retries - 1:
-                    time.sleep(5)
+                    print(f"Warning (attempt {attempt + 1}): {e}")
+                    time.sleep(base_delay * (attempt + 1))
                 else:
                     return None, f"Max retries exceeded: {e}", None
+        return None, f"Failed after {vertex_max_retries} attempts", None
 
     input_tokens = count_tokens_in_messages(messages)
     if input_tokens > max_tokens:

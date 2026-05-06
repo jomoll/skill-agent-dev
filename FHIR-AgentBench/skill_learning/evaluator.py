@@ -9,7 +9,7 @@ from typing import Dict, Optional
 import litellm
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "utils"))
-from core_utils import is_reasoning_llm, setup_api_keys
+from core_utils import is_reasoning_llm, safe_llm_call, setup_api_keys
 
 
 class FHIRSampleEvaluator:
@@ -91,13 +91,15 @@ Model answer: {agent_answer}
 Return 1 or 0."""
         try:
             if self.model.startswith("vertex_ai/") and not self.base_url:
-                from core_utils import _vertex_ai_complete
-                msg, _err, _usage = _vertex_ai_complete(
-                    self.model,
-                    [{"role": "user", "content": prompt}],
+                msg, error, _usage = safe_llm_call(
+                    model=self.model,
+                    messages=[{"role": "user", "content": prompt}],
                     temperature=0.0,
+                    max_retries=self.max_retries,
                     timeout=self.timeout,
                 )
+                if error:
+                    raise RuntimeError(error)
                 text = (msg.content or "").strip()
             else:
                 for attempt in range(self.max_retries):

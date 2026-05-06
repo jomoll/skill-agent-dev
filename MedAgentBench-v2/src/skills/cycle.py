@@ -896,7 +896,10 @@ class SkillCycleRunner:
                 best_regressed_traces = regressed_traces
 
         if best_candidate is None:
-            print("  [ProposalRanking] no proposal improved adjusted score — applying nothing")
+            print(
+                "  [ProposalRanking] no proposal met acceptance criteria "
+                "(adjusted > 0 and regressions <= baseline regressions) — applying nothing"
+            )
             return [], grpo_log, all_raw_proposals, new_labels
 
         print(f"  [ProposalRanking] winner: {best_candidate['action']}::{best_candidate['name']} "
@@ -931,8 +934,12 @@ class SkillCycleRunner:
                     best_adjusted = rev_adjusted
                     best_stats = (rev_fixes, rev_regressions, rev_invalid)
                 else:
-                    print(f"  [ContrastiveRevision] revision did not improve "
-                          f"({rev_adjusted:+d} ≤ {best_adjusted:+d}), keeping original")
+                    print(
+                        "  [ContrastiveRevision] revision did not meet acceptance criteria "
+                        f"(adjusted={rev_adjusted:+d}, best={best_adjusted:+d}, "
+                        f"regressions={rev_regressions}, baseline_regressions={baseline_regressions}), "
+                        "keeping original"
+                    )
 
         winner = dict(best_candidate)
         winner["_provenance"] = {
