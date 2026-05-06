@@ -319,7 +319,7 @@ cd AgentBench
 python -m src.run_manual_skills --config configs/manual_skills_dbbench.yaml --split val
 ```
 
-### Evaluating on the held-out test set (MedAgentBench and MedAgentBench-v2)
+### Evaluating on the held-out test set (MedAgentBench, MedAgentBench-v2, and FHIR-AgentBench)
 
 `src/run_eval.py` evaluates either the base agent (no learned skills) or a saved skill pack against any split. Use this after a skill cycle run to get test-set numbers.
 
@@ -353,6 +353,23 @@ The task worker must be running before invoking `run_eval.py` (same startup as t
 - `test_score.json` — summary `{split, score, n_correct, n_total, skills_dir}`
 
 `--split` accepts `dev`, `val`, or `test`. Omit `--skills-dir` for the base agent; pass a path to any `skills/learned/` or `skills/best/` directory for a skills-equipped agent. Use `--force` to overwrite an existing run directory.
+
+```bash
+# FHIR-AgentBench (no task worker needed — agents run in-process)
+cd FHIR-AgentBench && conda activate fhir-agentbench
+
+# Base agent on test set (code agent)
+python run_eval.py --config configs/skill_cycle_code.yaml --split test --run-name base_test
+
+# Best skills from a completed run on test set (code agent)
+python run_eval.py --config configs/skill_cycle_code.yaml --split test \
+    --skills-dir outputs/skill_cycle_code/run_001/skills/best --run-name run_001_best_test
+
+# Same pattern for the text agent
+python run_eval.py --config configs/skill_cycle_text.yaml --split test --run-name base_test_text
+```
+
+Results are written to `outputs/eval/<run-name>/`. FHIR-AgentBench uses an LLM judge for non-exact-match answers; scores are cached in `outputs/eval/<run-name>/eval_cache.json`.
 
 ---
 
