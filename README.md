@@ -16,7 +16,7 @@ After each batch of task episodes, a skill-writing LLM observes the agent's fail
 
 ### Memory comparators
 
-Each benchmark ships two memory-based comparators alongside the `skill_cycle`, answering two questions: (1) does structured skill encoding beat cheap natural-language memory, and (2) does the batch vs. per-sample update cadence matter?
+Each benchmark ships memory-based comparators alongside the `skill_cycle`, answering three questions: (1) does structured skill encoding beat cheap natural-language memory, (2) does the batch vs. per-sample update cadence matter, and (3) does retrieved Evo-style episodic/semantic memory close the gap to validated skill writing?
 
 **`memory_cycle` (sequential, paper-faithful)** — matches the MedAgentBench-v2 paper (Appendix A.2). After each individual failing sample, the updater LLM is called once with the paper's prompt template:
 
@@ -513,7 +513,7 @@ FHIR-AgentBench/skills/
 
 Learned skills are written to `outputs/<run>/skills/learned/` during training and loaded fresh on every inference call.
 
-Memory runs write bullets to `outputs/<run>/memory.md` and a `memory_log.jsonl` entry per update (batch index, bullets added, probe stats before and after).
+Memory runs write bullets to `outputs/<run>/memory.json` and per-epoch update logs as `memory_updates.json`.
 
 Evo memory runs write structured stores to `outputs/<run>/evo_memory/episodic.jsonl` and `outputs/<run>/evo_memory/semantic.json`; per-episode curator updates are logged under each epoch as `evo_memory_updates.json`.
 
@@ -600,3 +600,22 @@ Two fixes applied to all benchmarks:
 **Files:** `AgentBench/src/skills/cycle.py`, `MedAgentBench/src/skills/cycle.py`, `FHIR-AgentBench/skill_learning/cycle.py`
 
 At the end of each epoch, if val score improves, the current `skills/learned/` directory is snapshot-copied to `skills/best/`. At run end, `skills/best/` is restored as the final skill library. This prevents the cycle from ending on a skill that helped training but hurt val.
+
+### 7. Evo memory comparator — retrieved episodic + semantic memory
+**Files:**
+- `AgentBench/src/evo_memory/`, `AgentBench/src/evo_memory_cycle.py`
+- `AgentBench/src/client/agents/evo_memory_aware_agent.py`
+- `MedAgentBench/src/evo_memory/`, `MedAgentBench/src/evo_memory_cycle.py`
+- `MedAgentBench/src/client/agents/evo_memory_aware_agent.py`
+- `MedAgentBench-v2/src/evo_memory/`, `MedAgentBench-v2/src/evo_memory_cycle.py`
+- `MedAgentBench-v2/src/client/agents/evo_memory_aware_agent.py`
+- `FHIR-AgentBench/evo_memory/`, `FHIR-AgentBench/evo_memory_cycle.py`
+- `FHIR-AgentBench/skill_learning/evo_memory_cycle.py`
+
+An Evo-Memory-style comparator is added alongside the flat memory comparators. It stores completed dev episodes in `evo_memory/episodic.jsonl` and compact reusable procedural rules in `evo_memory/semantic.json`.
+
+- **Retrieved context:** inference injects only top-k relevant semantic rules and episodic summaries, rather than the full memory store.
+- **Semantic utility tracking:** each rule tracks `shown`, `success`, and `failure`; retrieval ranks by priority, lexical relevance, and a UCB-style utility score.
+- **Curator updates:** after every non-error dev episode, the updater LLM reflects with eval feedback and emits `episodic_summary`, `failure_analysis`, `action_guidelines`, and `tags`.
+- **No probe gate:** unlike `skill_cycle`, Evo memory updates are not accepted or rejected via probe scoring. This keeps the comparator focused on retrieved structured memory rather than validated skill mutation.
+- **Injection point:** AgentBench-style repos use `EvoMemoryAwareAgent`, mirroring skill/memory injection: prefix on the first decision and suffix on continuation turns. FHIR-AgentBench injects the retrieved memory block into the native agent system prompt.
