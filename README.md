@@ -33,6 +33,8 @@ Output is plain prose starting with `"when asked ..."` — task-specific conditi
 
 **`evo_memory_cycle`** — Evo-Memory-style structured memory comparator. Instead of appending all notes into one prompt, it maintains two stores: episodic memories of completed task attempts and a compact semantic cheatsheet of reusable procedural rules. At inference time it retrieves only top-k relevant rules/episodes; after each dev episode, a curator LLM reflects with eval feedback, updates the stores, and tracks rule utility (`shown`, `success`, `failure`). There is no probe acceptance gate — this tests retrieval and utility-tracked memory curation against validated skill writing.
 
+Note: the Evo comparator's baseline is a **protocol-only baseline**. Even before any episodic or semantic memory exists, the agent receives the Evo memory-guided reasoning protocol ("use memory as strategy guidance, not answer lookup; prefer current task details; reuse portable workflows"). Later epochs add retrieved rules/episodes on top of that fixed protocol, so Evo learning curves should be interpreted as memory accumulation relative to the Evo protocol baseline, not as a prompt-identical baseline to `memory_cycle`.
+
 | Comparator | Learned artifact | Update source | Selection mechanism |
 |---|---|---|---|
 | `skill_cycle` | Markdown skills | Failure traces | Probe-scored fixes minus regressions |
@@ -281,20 +283,26 @@ system prompt, and scores samples with a cached per-sample answer judge.
 
 ```bash
 cd FHIR-AgentBench && conda activate fhir-agentbench
-python skill_cycle.py --config configs/skill_cycle.yaml --run-name run_001
+
+# Text/resource agent
+python skill_cycle.py --config configs/skill_cycle_text.yaml --run-name run_001
+
+# Code/resource agent
+python skill_cycle.py --config configs/skill_cycle_code.yaml --run-name run_001
 ```
 
 If a run is interrupted or killed, resume it from the last completed samples:
 
 ```bash
-python skill_cycle.py --config configs/skill_cycle.yaml --run-name run_001 --resume
+python skill_cycle.py --config configs/skill_cycle_text.yaml --run-name run_001 --resume
+python skill_cycle.py --config configs/skill_cycle_code.yaml --run-name run_001 --resume
 ```
 
-The default config uses `multi_turn_code_resource`, `openai/gpt-oss-120b`, the CSV at
-`final_dataset/questions_answers_sql_fhir.csv`, the CSV `train` split as dev (capped at 80 samples), and
-the CSV `valid` split as val (capped at 40 samples), with skill updates running every 20 samples. For local vLLM/LiteLLM-compatible models, set
-`agent.base_url`, `updater.base_url`, and `eval.base_url` in
-`FHIR-AgentBench/configs/skill_cycle.yaml`.
+`configs/skill_cycle_text.yaml` uses `multi_turn_resource`; `configs/skill_cycle_code.yaml`
+uses `multi_turn_code_resource`. Both use `openai/gpt-oss-120b`, the CSV at
+`final_dataset/questions_answers_sql_fhir.csv`, the CSV `train` split as dev, and
+the CSV `valid` split as val. For local vLLM/LiteLLM-compatible models, set
+`agent.base_url`, `updater.base_url`, and `eval.base_url` in the selected config.
 
 FHIR-AgentBench uses the same grouped proposal-ranking shape as AgentBench and
 MedAgentBench: `cycle.grpo_k` is the total number of proposal calls per update,
@@ -381,6 +389,7 @@ python evo_memory_cycle.py --config configs/evo_memory_cycle.yaml --run-name evo
 - Memory notes appended unconditionally (no probe-based acceptance gate) — the gate is one of the variables under test
 - Val score tracked identically, enabling direct learning-curve comparison
 - Evo memory also avoids the probe gate; its distinct variable is retrieved structured memory with utility-tracked semantic rules
+- Evo memory uses a protocol-only baseline, so compare epoch gains against its own baseline; compare absolute baseline values to other approaches with that prompt difference in mind
 
 **Implementation across benchmarks:**
 
@@ -477,7 +486,8 @@ Key config files:
 | `MedAgentBench-v2/configs/memory_cycle.yaml` | MedAgentBench-v2 sequential memory cycle |
 | `MedAgentBench-v2/configs/batch_memory_cycle.yaml` | MedAgentBench-v2 batch memory cycle |
 | `MedAgentBench-v2/configs/evo_memory_cycle.yaml` | MedAgentBench-v2 Evo memory comparator |
-| `FHIR-AgentBench/configs/skill_cycle.yaml` | FHIR-AgentBench native skill cycle hyperparameters |
+| `FHIR-AgentBench/configs/skill_cycle_text.yaml` | FHIR-AgentBench text/resource-agent skill cycle |
+| `FHIR-AgentBench/configs/skill_cycle_code.yaml` | FHIR-AgentBench code/resource-agent skill cycle |
 | `FHIR-AgentBench/configs/memory_cycle.yaml` | FHIR-AgentBench sequential memory cycle |
 | `FHIR-AgentBench/configs/batch_memory_cycle.yaml` | FHIR-AgentBench batch memory cycle |
 | `FHIR-AgentBench/configs/evo_memory_cycle.yaml` | FHIR-AgentBench Evo memory comparator |
