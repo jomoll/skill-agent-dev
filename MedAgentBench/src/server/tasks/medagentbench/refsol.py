@@ -45,7 +45,6 @@ def task2(case_data, results, fhir_api_base):
     dob_str = get_res['entry'][0]['resource']['birthDate']
     parsed_date = datetime.strptime(dob_str, "%Y-%m-%d")
     ref_sol = [calculate_age(parsed_date)]
-    print(case_data['id'], ref_sol, results.result, flush=True)
     return match_agent_result(ref_sol, results.result)
 
 
@@ -89,7 +88,6 @@ def task4(case_data, results, fhir_api_base):
                 last_value = value
     ref_sol = [last_value if last_value is not None else -1]
 
-    print(case_data['id'], ref_sol, results.result, flush=True)
     return match_agent_result(ref_sol, results.result)
 
 def task5(case_data, results, fhir_api_base):
@@ -140,7 +138,6 @@ def task5(case_data, results, fhir_api_base):
             return False
     
     ref_sol = [last_value if last_value is not None else -1]
-    print(case_data['id'], ref_sol, results.result, flush=True)
     return match_agent_result(ref_sol, results.result, accept_empty=True)
 
 def task6(case_data, results, fhir_api_base):
@@ -159,7 +156,6 @@ def task6(case_data, results, fhir_api_base):
     
     ref_sol = [glu_sum/glu_count if glu_count != 0 else -1]
 
-    print(case_data['id'], ref_sol, results.result, flush=True)
     extracted = extract_numeric(results.result)
     if extracted is not None and abs(extracted - ref_sol[0]) < 0.1:
         return True
@@ -179,7 +175,6 @@ def task7(case_data, results, fhir_api_base):
             last_value = value
     ref_sol = [last_value if last_value is not None else -1]
 
-    print(case_data['id'], ref_sol, results.result, flush=True)
     return match_agent_result(ref_sol, results.result)
 
 
@@ -265,7 +260,6 @@ def task9(case_data, results, fhir_api_base):
             return False
 
     ref_sol = [last_value if last_value is not None else -1]
-    print(case_data['id'], ref_sol, results.result, flush=True)
     return match_agent_result(ref_sol, results.result, accept_empty=True)
 
 def task10(case_data, results, fhir_api_base):
@@ -310,6 +304,5 @@ def task10(case_data, results, fhir_api_base):
             return False
 
 
-    print(case_data['id'], ref_sol, results.result, flush=True)
     return match_agent_result(ref_sol, results.result, accept_empty=True)
 #task2({'eval_MRN': 'S2874099'}, '[(0)]', "http://34.170.56.151:8080/fhir/")
