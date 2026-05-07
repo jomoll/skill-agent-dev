@@ -371,6 +371,90 @@ python run_eval.py --config configs/skill_cycle_text.yaml --split test --run-nam
 
 Results are written to `outputs/eval/<run-name>/`. FHIR-AgentBench uses an LLM judge for non-exact-match answers; scores are cached in `outputs/eval/<run-name>/eval_cache.json`.
 
+### Cross-benchmark skill transfer (FHIR triplet)
+
+Skills learned on one FHIR benchmark can be evaluated on another without any code changes — the skill file format (Markdown + YAML frontmatter) is identical across MedAgentBench, MedAgentBench-v2, and FHIR-AgentBench. Pass `--skills-dir` pointing to the source benchmark's `skills/best/` directory and run `run_eval.py` for the target benchmark as normal. The target benchmark's base skills are still loaded alongside the transferred ones.
+
+The task worker for the target benchmark must be running (same as a normal eval). FHIR-AgentBench is self-contained and needs no worker.
+
+**MedAgentBench → MedAgentBench-v2**
+
+```bash
+cd MedAgentBench-v2 && conda activate medagentbench
+python -m src.run_eval --config configs/skill_cycle.yaml --split val \
+    --skills-dir ../MedAgentBench/outputs/skill_cycle/run_001/skills/best \
+    --run-name cross_from_mab_val
+python -m src.run_eval --config configs/skill_cycle.yaml --split test \
+    --skills-dir ../MedAgentBench/outputs/skill_cycle/run_001/skills/best \
+    --run-name cross_from_mab_test
+```
+
+**MedAgentBench-v2 → MedAgentBench**
+
+```bash
+cd MedAgentBench && conda activate medagentbench
+python -m src.run_eval --config configs/skill_cycle.yaml --split val \
+    --skills-dir ../MedAgentBench-v2/outputs/skill_cycle/run_001/skills/best \
+    --run-name cross_from_mab_v2_val
+python -m src.run_eval --config configs/skill_cycle.yaml --split test \
+    --skills-dir ../MedAgentBench-v2/outputs/skill_cycle/run_001/skills/best \
+    --run-name cross_from_mab_v2_test
+```
+
+**MedAgentBench → FHIR-AgentBench**
+
+```bash
+cd FHIR-AgentBench && conda activate fhir-agentbench
+python run_eval.py --config configs/skill_cycle_code.yaml --split val \
+    --skills-dir ../MedAgentBench/outputs/skill_cycle/run_001/skills/best \
+    --run-name cross_from_mab_val
+python run_eval.py --config configs/skill_cycle_code.yaml --split test \
+    --skills-dir ../MedAgentBench/outputs/skill_cycle/run_001/skills/best \
+    --run-name cross_from_mab_test
+# repeat with --config configs/skill_cycle_text.yaml for the text agent
+```
+
+**MedAgentBench-v2 → FHIR-AgentBench**
+
+```bash
+cd FHIR-AgentBench && conda activate fhir-agentbench
+python run_eval.py --config configs/skill_cycle_code.yaml --split val \
+    --skills-dir ../MedAgentBench-v2/outputs/skill_cycle/run_001/skills/best \
+    --run-name cross_from_mab_v2_val
+python run_eval.py --config configs/skill_cycle_code.yaml --split test \
+    --skills-dir ../MedAgentBench-v2/outputs/skill_cycle/run_001/skills/best \
+    --run-name cross_from_mab_v2_test
+# repeat with --config configs/skill_cycle_text.yaml for the text agent
+```
+
+**FHIR-AgentBench → MedAgentBench**
+
+```bash
+cd MedAgentBench && conda activate medagentbench
+# skills from the code agent
+python -m src.run_eval --config configs/skill_cycle.yaml --split val \
+    --skills-dir ../FHIR-AgentBench/outputs/skill_cycle_code/run_001/skills/best \
+    --run-name cross_from_fab_code_val
+python -m src.run_eval --config configs/skill_cycle.yaml --split test \
+    --skills-dir ../FHIR-AgentBench/outputs/skill_cycle_code/run_001/skills/best \
+    --run-name cross_from_fab_code_test
+# repeat with skill_cycle_text/run_001/skills/best for the text agent
+```
+
+**FHIR-AgentBench → MedAgentBench-v2**
+
+```bash
+cd MedAgentBench-v2 && conda activate medagentbench
+# skills from the code agent
+python -m src.run_eval --config configs/skill_cycle.yaml --split val \
+    --skills-dir ../FHIR-AgentBench/outputs/skill_cycle_code/run_001/skills/best \
+    --run-name cross_from_fab_code_val
+python -m src.run_eval --config configs/skill_cycle.yaml --split test \
+    --skills-dir ../FHIR-AgentBench/outputs/skill_cycle_code/run_001/skills/best \
+    --run-name cross_from_fab_code_test
+# repeat with skill_cycle_text/run_001/skills/best for the text agent
+```
+
 ---
 
 ## Running the memory cycle
@@ -658,12 +742,26 @@ Two fixes applied to all benchmarks:
 
 **Symmetric error exclusion:** When a probe sample produces a task error (machinery failure, not agent failure), it is excluded from regression counting *only if that same sample also errored in the baseline probe* (`baseline_error_ids`). This prevents inflated adjusted scores from unconditionally skipping candidate errors that the baseline did not produce.
 
-### 6. Best-checkpoint tracking
+### 6. Lenient result scoring — format-independent numeric matching (MedAgentBench)
+**Files:** `MedAgentBench/src/server/tasks/medagentbench/utils.py`, `MedAgentBench/src/server/tasks/medagentbench/refsol.py`
+
+The original graders called `json.loads(results.result)` which silently returns `False` via a bare `except` when `results.result` is already a Python object (list or number) rather than a JSON string — a frequent occurrence when results travel through the HTTP task API. This caused false negatives on all read tasks.
+
+Additionally, read-task graders required exact JSON equality for numeric answers. Agents that found the correct value but expressed it as prose (e.g., `"85 mg/dL"` instead of `[85.0]`) were scored incorrect even though the clinical answer was right, making base-agent vs. skill-agent comparisons confounded by formatting rather than reasoning.
+
+Two helpers added to `utils.py`:
+- `parse_agent_result(raw)` — normalises to Python object whether `raw` is a JSON string or already deserialized.
+- `extract_numeric(raw)` — extracts the first numeric value from any result format (Python list, list of prose strings, bare string).
+- `match_agent_result(ref_sol, raw, tol=0.0, accept_empty=False)` — tries exact match first, then numeric extraction with configurable tolerance (default 0, i.e. exact numeric value regardless of units or surrounding text). `accept_empty=True` for write tasks that accept `[]` as a valid completion signal.
+
+All read-task graders (`task1`, `task2`, `task4`, `task5`, `task6`, `task7`, `task9`, `task10`) updated to use these helpers. Write-task graders (`task3`, `task8`) are unchanged (they check FHIR POST history, not `results.result`).
+
+### 8. Best-checkpoint tracking
 **Files:** `AgentBench/src/skills/cycle.py`, `MedAgentBench/src/skills/cycle.py`, `FHIR-AgentBench/skill_learning/cycle.py`
 
 At the end of each epoch, if val score improves, the current `skills/learned/` directory is snapshot-copied to `skills/best/`. At run end, `skills/best/` is restored as the final skill library. This prevents the cycle from ending on a skill that helped training but hurt val.
 
-### 7. Evo memory comparator — retrieved episodic + semantic memory
+### 9. Evo memory comparator — retrieved episodic + semantic memory
 **Files:**
 - `AgentBench/src/evo_memory/`, `AgentBench/src/evo_memory_cycle.py`
 - `AgentBench/src/client/agents/evo_memory_aware_agent.py`
