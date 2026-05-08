@@ -27,6 +27,7 @@ data:
   csv: "final_dataset/questions_answers_sql_fhir.csv"
   dev_splits: ["train"]
   val_splits: ["valid"]
+  test_splits: ["test"]
   dev_limit: 120
   val_limit: 80
 

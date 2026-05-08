@@ -25,12 +25,7 @@ def task1(case_data, results, fhir_api_base):
     if check_has_post(results) is True: #Should not have any POST request
         return False
     ref_sol = case_data['sol']
-    try:
-        if ref_sol == json.loads(results.result):
-            return True
-        return False
-    except:
-        return False
+    return match_agent_result(ref_sol, results.result)
 
 from datetime import datetime, timedelta
 def calculate_age(dob):
@@ -50,13 +45,7 @@ def task2(case_data, results, fhir_api_base):
     dob_str = get_res['entry'][0]['resource']['birthDate']
     parsed_date = datetime.strptime(dob_str, "%Y-%m-%d")
     ref_sol = [calculate_age(parsed_date)]
-    print(case_data['id'], ref_sol, results.result, flush=True)
-    try:
-        if ref_sol == json.loads(results.result):
-            return True
-        return False
-    except:
-        return False
+    return match_agent_result(ref_sol, results.result)
 
 
 def task3(case_data, results, fhir_api_base):
@@ -99,13 +88,7 @@ def task4(case_data, results, fhir_api_base):
                 last_value = value
     ref_sol = [last_value if last_value is not None else -1]
 
-    print(case_data['id'], ref_sol, results.result, flush=True)
-    try:
-        if ref_sol == json.loads(results.result):
-            return True
-        return False
-    except:
-        return False
+    return match_agent_result(ref_sol, results.result)
 
 def task5(case_data, results, fhir_api_base):
     url = f"{fhir_api_base}Observation?patient={case_data['eval_MRN']}&code=MG&_count=5000&_format=json"
@@ -155,13 +138,7 @@ def task5(case_data, results, fhir_api_base):
             return False
     
     ref_sol = [last_value if last_value is not None else -1]
-    print(case_data['id'], ref_sol, results.result, flush=True)
-    try:
-        if (ref_sol == json.loads(results.result)) or ([] == json.loads(results.result)): #We only ask the model to check, so it's fine if model returns []
-            return True
-        return False
-    except:
-        return False
+    return match_agent_result(ref_sol, results.result, accept_empty=True)
 
 def task6(case_data, results, fhir_api_base):
     if check_has_post(results) is True: #Should not have any POST request
@@ -179,14 +156,10 @@ def task6(case_data, results, fhir_api_base):
     
     ref_sol = [glu_sum/glu_count if glu_count != 0 else -1]
 
-    print(case_data['id'], ref_sol, results.result, flush=True)
-    try:
-        l = json.loads(results.result)
-        if (len(l) == 1) and abs(l[0]-ref_sol[0])<0.1:
-            return True
-        return False
-    except:
-        return False
+    extracted = extract_numeric(results.result)
+    if extracted is not None and abs(extracted - ref_sol[0]) < 0.1:
+        return True
+    return False
 
 def task7(case_data, results, fhir_api_base):
     if check_has_post(results) is True: #Should not have any POST request
@@ -202,13 +175,7 @@ def task7(case_data, results, fhir_api_base):
             last_value = value
     ref_sol = [last_value if last_value is not None else -1]
 
-    print(case_data['id'], ref_sol, results.result, flush=True)
-    try:
-        if ref_sol == json.loads(results.result):
-            return True
-        return False
-    except:
-        return False
+    return match_agent_result(ref_sol, results.result)
 
 
 def task8(case_data, results, fhir_api_base):
@@ -293,13 +260,7 @@ def task9(case_data, results, fhir_api_base):
             return False
 
     ref_sol = [last_value if last_value is not None else -1]
-    print(case_data['id'], ref_sol, results.result, flush=True)
-    try:
-        if (ref_sol == json.loads(results.result)) or ([] == json.loads(results.result)): #We only ask the model to check, so it's fine if model returns []
-            return True
-        return False
-    except:
-        return False
+    return match_agent_result(ref_sol, results.result, accept_empty=True)
 
 def task10(case_data, results, fhir_api_base):
     url = f"{fhir_api_base}Observation?patient={case_data['eval_MRN']}&code=A1C&_count=5000&_format=json"
@@ -343,11 +304,5 @@ def task10(case_data, results, fhir_api_base):
             return False
 
 
-    print(case_data['id'], ref_sol, results.result, flush=True)
-    try:
-        if (ref_sol == json.loads(results.result)) or ([] == json.loads(results.result)): #We only ask the model to check, so it's fine if model returns []
-            return True
-        return False
-    except:
-        return False
+    return match_agent_result(ref_sol, results.result, accept_empty=True)
 #task2({'eval_MRN': 'S2874099'}, '[(0)]', "http://34.170.56.151:8080/fhir/")

@@ -56,10 +56,10 @@ def main():
     output_dir = Path(config.get("output_dir", "outputs/skill_cycle"))
     run_dir = output_dir / run_name
 
-    if run_dir.exists() and not args.force:
+    if run_dir.exists() and not args.force and not args.resume:
         print(
             f"Run directory already exists: {run_dir}\n"
-            "Use --force to overwrite.",
+            "Use --force to overwrite or --resume to continue.",
             file=sys.stderr,
         )
         sys.exit(1)

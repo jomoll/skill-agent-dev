@@ -1,4 +1,87 @@
+import json
+import re
 import requests
+
+
+def parse_agent_result(raw):
+    """Normalize agent result to a Python object regardless of whether it
+    arrived as a JSON string (from the HTTP API) or was already deserialized."""
+    if isinstance(raw, str):
+        return json.loads(raw)
+    return raw
+
+
+def extract_numeric(raw):
+    """Extract the first numeric value from any result representation.
+
+    Handles JSON strings, Python lists of numbers, Python lists of prose
+    strings (e.g. ["85 mg/dL"]), and bare strings.
+    Returns float, or None if no number can be found.
+    """
+    try:
+        parsed = parse_agent_result(raw)
+    except Exception:
+        parsed = raw
+
+    if isinstance(parsed, (int, float)):
+        return float(parsed)
+    if isinstance(parsed, list) and len(parsed) >= 1:
+        val = parsed[0]
+        if isinstance(val, (int, float)):
+            return float(val)
+        if isinstance(val, str):
+            m = re.search(r"-?\d+(?:\.\d+)?", val)
+            if m:
+                return float(m.group())
+    if isinstance(parsed, str):
+        m = re.search(r"-?\d+(?:\.\d+)?", parsed)
+        if m:
+            return float(m.group())
+    return None
+
+
+def match_agent_result(ref_sol, raw, tol=0.0, accept_empty=False):
+    """Compare agent result against reference with lenient type handling.
+
+    Steps:
+    1. Normalize raw (JSON string or Python object → Python object).
+    2. Try exact equality.
+    3. If ref_sol is [single_number], try extracting a number from raw
+       and compare with the given tolerance (default 0 = exact).
+    4. Optionally accept [] as a valid answer (write tasks where the
+       agent signals completion without restating the measured value).
+
+    """
+    try:
+        parsed = parse_agent_result(raw)
+    except Exception:
+        parsed = None
+
+    if parsed is not None and ref_sol == parsed:
+        return True
+
+    if accept_empty and parsed == []:
+        return True
+
+    if (isinstance(ref_sol, list) and len(ref_sol) == 1
+            and isinstance(ref_sol[0], (int, float))):
+        extracted = extract_numeric(raw)
+        if extracted is not None:
+            return abs(extracted - float(ref_sol[0])) <= tol
+
+    if (isinstance(ref_sol, list) and len(ref_sol) == 2
+            and isinstance(ref_sol[0], (int, float))
+            and isinstance(ref_sol[1], str)
+            and isinstance(parsed, list) and len(parsed) == 2):
+        extracted = extract_numeric(parsed[0])
+        date_prefix = str(ref_sol[1])[:10]
+        if (extracted is not None
+                and abs(extracted - float(ref_sol[0])) <= tol
+                and isinstance(parsed[1], str)
+                and parsed[1].startswith(date_prefix)):
+            return True
+
+    return False
 
 def verify_fhir_server(fhir_api_base):
     """
