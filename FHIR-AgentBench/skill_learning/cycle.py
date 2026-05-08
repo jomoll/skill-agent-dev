@@ -387,6 +387,9 @@ class FHIRSkillCycleRunner:
             return None
 
         sample_to_label, new_labels = self.updater.classify_failures(failing, prev_taxonomy)
+        for e in failing:
+            if e.get("status") == "sample_timeout":
+                sample_to_label[str(e.get("sample_id", ""))] = "sample_timeout"
 
         # Drop infrastructure failures (timeouts, runner crashes, service errors) so the
         # updater never wastes proposals on things that aren't skill gaps.
@@ -1019,7 +1022,9 @@ class FHIRSkillCycleRunner:
             "query_type": sample.get("template") or sample.get("main_table_name"),
             "is_correct": is_correct,
             "update_cycle": update_cycle,
-            "status": "completed" if not parsed.get("error") else "agent_error",
+            "status": "completed" if not parsed.get("error") else (
+                "sample_timeout" if "sample wall-clock timeout" in (parsed.get("error") or "") else "agent_error"
+            ),
             "error": parsed.get("error"),
             "ground_truth": sample.get("true_answer"),
             "task_result": {
