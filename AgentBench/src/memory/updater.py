@@ -11,7 +11,9 @@ Prompt design matches the original MedAgentBench-v2 paper (Appendix A.2):
 The memory is a flat JSON list of strings. After each update cycle:
   1. propose() calls the LLM once per failing entry.
   2. New bullets are appended to the list.
-  3. condense() is called when the list reaches max_bullets capacity.
+
+Memory is intentionally append-only to match the original MedAgentBench-v2
+implementation, which grows the <memory> block without summarising it.
 """
 from __future__ import annotations
 
@@ -184,44 +186,6 @@ class MemoryUpdater:
                 new_bullets.append(bullet)
         return new_bullets
 
-    def condense(self, bullets: List[str]) -> List[str]:
-        """Ask the LLM to condense the memory list when at capacity."""
-        target = max(10, self.max_bullets // 2)
-        bullets_text = "\n".join(f"- {b}" for b in bullets)
-        prompt = (
-            f"The following memory list has {len(bullets)} entries. "
-            f"Please condense it to at most {target} entries by merging similar notes "
-            "and keeping only the most impactful ones. Preserve the 'when asked...' format "
-            "where applicable.\n\n"
-            f"Current entries:\n{bullets_text}\n\n"
-            f"Return ONLY a JSON array of at most {target} strings:\n"
-            '["entry 1", "entry 2"]'
-        )
-        try:
-            from typing import Any
-            candidates = []
-            text = self.agent.inference([{"role": "user", "content": prompt}])
-            fenced = re.search(r"```(?:json)?\s*(.*?)\s*```", text or "", re.DOTALL)
-            if fenced:
-                candidates.append(fenced.group(1).strip())
-            candidates.append(text or "")
-            for candidate in candidates:
-                start = candidate.find("[")
-                if start == -1:
-                    continue
-                try:
-                    data = json.loads(candidate[start:])
-                    if isinstance(data, list):
-                        result = _normalise_memory_list(data)
-                        if result:
-                            print(f"[MemoryUpdater] condensed {len(bullets)} → {len(result)} entries")
-                            return result[:target]
-                except json.JSONDecodeError:
-                    pass
-        except Exception as e:
-            print(f"[MemoryUpdater] condense failed: {e}")
-        return bullets[:target]
-
     def update(self, memory_path: Path, failing_entries: List[Dict]) -> List[str]:
         """Load memory, propose new notes, append, save and return updated list."""
         current: List[str] = []
@@ -235,9 +199,6 @@ class MemoryUpdater:
 
         new_bullets = self.propose(failing_entries, current)
         updated = current + new_bullets
-
-        if len(updated) > self.max_bullets:
-            updated = self.condense(updated)
 
         memory_path.write_text(
             json.dumps(updated, indent=2, ensure_ascii=False), encoding="utf-8"
