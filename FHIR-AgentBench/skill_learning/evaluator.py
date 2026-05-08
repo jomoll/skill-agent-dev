@@ -6,10 +6,8 @@ import threading
 from pathlib import Path
 from typing import Dict, Optional
 
-import litellm
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "utils"))
-from core_utils import is_reasoning_llm, safe_llm_call, setup_api_keys
+from core_utils import get_litellm, is_reasoning_llm, safe_llm_call, setup_api_keys
 
 
 class FHIRSampleEvaluator:
@@ -105,6 +103,7 @@ Return 1 or 0."""
                     raise RuntimeError(error)
                 text = (msg.content or "").strip()
             else:
+                litellm = get_litellm()
                 for attempt in range(self.max_retries):
                     try:
                         response = litellm.completion(

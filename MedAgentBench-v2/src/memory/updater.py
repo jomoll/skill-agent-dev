@@ -21,6 +21,85 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
+_WRAPPER_TAG_RE = re.compile(r"</?(?:current_prompt|memory)>", re.IGNORECASE)
+_FENCED_BLOCK_RE = re.compile(r"```(?:json|text)?\s*(.*?)\s*```", re.DOTALL | re.IGNORECASE)
+
+
+def _strip_code_fence(text: str) -> str:
+    fenced = _FENCED_BLOCK_RE.search(text)
+    return fenced.group(1).strip() if fenced else text.strip()
+
+
+def _normalise_memory_note(text: Any) -> Optional[str]:
+    """Return one plain memory note, or None if the response is unusable."""
+    if text is None:
+        return None
+    raw = _strip_code_fence(str(text)).strip()
+    if not raw:
+        return None
+
+    # Some models return a JSON array despite the prompt. Prefer the last note,
+    # which is usually the newly proposed one when the whole memory is echoed.
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            notes = [_normalise_memory_note(item) for item in parsed]
+            notes = [note for note in notes if note]
+            return notes[-1] if notes else None
+    except Exception:
+        pass
+
+    cleaned = _WRAPPER_TAG_RE.sub("\n", raw)
+    lines = []
+    for line in cleaned.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.lower().startswith("correction notes from past experience"):
+            continue
+        line = re.sub(r"^\s*[-*]\s+", "", line).strip()
+        if line:
+            lines.append(line)
+
+    if not lines:
+        return None
+
+    starts = [i for i, line in enumerate(lines) if line.lower().startswith("when asked")]
+    if starts:
+        start = starts[-1]
+        end = next(
+            (i for i in range(start + 1, len(lines)) if lines[i].lower().startswith("when asked")),
+            len(lines),
+        )
+        note = " ".join(lines[start:end]).strip()
+    else:
+        match = re.search(r"\bwhen asked\b.*", " ".join(lines), re.IGNORECASE | re.DOTALL)
+        if not match:
+            return None
+        note = match.group(0).strip()
+
+    note = re.sub(r"\s+", " ", note).strip()
+    note = re.sub(r"^\s*[-*]\s+", "", note).strip()
+    if _WRAPPER_TAG_RE.search(note) or not note.lower().startswith("when asked"):
+        return None
+    return note
+
+
+def _normalise_memory_list(bullets: List[Any]) -> List[str]:
+    normalised: List[str] = []
+    seen = set()
+    for bullet in bullets:
+        note = _normalise_memory_note(bullet)
+        if not note:
+            continue
+        key = note.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalised.append(note)
+    return normalised
+
+
 def _render_memory_block(bullets: List[str]) -> str:
     if not bullets:
         return "<memory>\n</memory>"
@@ -87,10 +166,11 @@ class MemoryUpdater:
 
         try:
             response = self.agent.inference([{"role": "user", "content": prompt}])
-            bullet = response.strip()
+            bullet = _normalise_memory_note(response)
             if bullet:
                 print(f"[MemoryUpdater] new note: {bullet[:120]}")
                 return bullet
+            print("[MemoryUpdater] discarded malformed note")
         except Exception as e:
             print(f"[MemoryUpdater] propose_one failed: {e}")
         return None
@@ -134,7 +214,7 @@ class MemoryUpdater:
                 try:
                     data = json.loads(candidate[start:])
                     if isinstance(data, list):
-                        result = [str(b).strip() for b in data if isinstance(b, str) and b.strip()]
+                        result = _normalise_memory_list(data)
                         if result:
                             print(f"[MemoryUpdater] condensed {len(bullets)} → {len(result)} entries")
                             return result[:target]
@@ -149,12 +229,17 @@ class MemoryUpdater:
         current: List[str] = []
         if memory_path.exists():
             try:
-                current = json.loads(memory_path.read_text(encoding="utf-8"))
+                current = _normalise_memory_list(
+                    json.loads(memory_path.read_text(encoding="utf-8"))
+                )
             except Exception:
                 current = []
 
         new_bullets = self.propose(failing_entries, current)
         updated = current + new_bullets
+
+        if len(updated) > self.max_bullets:
+            updated = self.condense(updated)
 
         memory_path.write_text(
             json.dumps(updated, indent=2, ensure_ascii=False), encoding="utf-8"

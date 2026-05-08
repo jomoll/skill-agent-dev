@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 _WORD_RE = re.compile(r"[a-z0-9]+")
 _PRIORITY_RE = re.compile(r"^\s*\[(P[0-2])\]\s*(.*)$")
+_MEMORY_TAG_RE = re.compile(r"</?(?:current_prompt|memory)>", re.IGNORECASE)
 
 
 @dataclass
@@ -60,7 +61,20 @@ def _truncate(text: Any, max_chars: int) -> str:
 
 
 def _normalize_rule(text: str) -> str:
-    s = re.sub(r"\s+", " ", str(text or "")).strip(" -\t\n")
+    raw = str(text or "")
+    wrapped = bool(_MEMORY_TAG_RE.search(raw))
+    cleaned = _MEMORY_TAG_RE.sub("\n", raw)
+    lines: List[str] = []
+    for line in cleaned.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.lower().startswith("correction notes from past experience"):
+            continue
+        lines.append(re.sub(r"^\s*[-*]\s+", "", line).strip())
+    if wrapped and len(lines) > 1:
+        lines = [lines[-1]]
+    s = re.sub(r"\s+", " ", " ".join(lines)).strip(" -\t\n")
     if not s:
         return ""
     if _PRIORITY_RE.match(s):
@@ -223,6 +237,42 @@ class EvoMemoryCore:
             "semantic_size": len(self.semantic),
             "episodic_size": len(self.episodic),
         }
+
+    def sync_semantic_from_curated_texts(self, curated_texts: List[str], tags: List[str]) -> None:
+        """Replace semantic memory with an LLM-curated list, preserving stats for surviving rules."""
+        old_by_key = {_semantic_key(e.get("text", "")): e for e in self.semantic}
+        merged: List[Dict[str, Any]] = []
+        seen: set = set()
+        for raw in curated_texts:
+            text = _normalize_rule(str(raw))
+            if not _is_actionable_rule(text):
+                continue
+            key = _semantic_key(text)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            if key in old_by_key:
+                entry = dict(old_by_key[key])
+                entry["text"] = text
+                entry["tags"] = _merge_tags(
+                    entry.get("tags", []), tags,
+                    _infer_tags(text, self.config.max_tags_per_rule),
+                    max_tags=self.config.max_tags_per_rule,
+                )
+                entry["updated_at"] = datetime.now().isoformat()
+            else:
+                entry = {
+                    "id": f"rule_{uuid.uuid4().hex[:12]}",
+                    "text": text,
+                    "tags": _merge_tags(tags, _infer_tags(text, self.config.max_tags_per_rule), max_tags=self.config.max_tags_per_rule),
+                    "shown": 0,
+                    "success": 0,
+                    "failure": 0,
+                    "created_at": datetime.now().isoformat(),
+                    "updated_at": datetime.now().isoformat(),
+                }
+            merged.append(entry)
+        self.semantic = self._postprocess_semantic(merged)
 
     def save(self) -> None:
         self.root_dir.mkdir(parents=True, exist_ok=True)

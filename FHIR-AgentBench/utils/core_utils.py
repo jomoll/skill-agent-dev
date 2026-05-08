@@ -10,10 +10,6 @@ import yaml
 from pathlib import Path
 from typing import Optional, Dict, Any, Union
 import time
-import litellm
-litellm.drop_params=True
-litellm.suppress_debug_info = True
-from litellm.exceptions import BadRequestError
 import logging
 logging.getLogger("LiteLLM").disabled = True
 import tiktoken
@@ -23,6 +19,18 @@ PROJECT_ROOT = Path(__file__).parent.parent
 CONFIG_PATH = PROJECT_ROOT / "config.yml"
 
 count_token_encoding = tiktoken.get_encoding("cl100k_base")
+
+
+def get_litellm():
+    import litellm
+
+    litellm.drop_params = True
+    litellm.suppress_debug_info = True
+    return litellm
+
+
+def is_bad_request_error(error: Exception) -> bool:
+    return error.__class__.__name__ == "BadRequestError"
 
 # =============================================================================
 # Configuration Management
@@ -629,6 +637,7 @@ def safe_llm_call(
     num_turns = len(messages)
     for attempt in range(max_retries):
         try:
+            litellm = get_litellm()
             output = litellm.completion(
                 model=model, 
                 messages=messages, 
@@ -661,9 +670,9 @@ def safe_llm_call(
             messages = messages[:num_turns]
             return response, None, usage_info
         
-        except BadRequestError as e:
-            return None, f"BadRequestError: {e}", None
         except Exception as e:
+            if is_bad_request_error(e):
+                return None, f"BadRequestError: {e}", None
             if attempt < max_retries - 1:
                 # Suppress output to keep CLI clean
                 # print(f"[LLM] Retrying ({attempt + 1}/{max_retries}): {e}")

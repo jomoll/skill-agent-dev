@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from ..agent import AgentClient
+from ...memory.updater import _normalise_memory_list
 
 
 class MemoryAwareAgent(AgentClient):
@@ -29,6 +30,7 @@ class MemoryAwareAgent(AgentClient):
             bullets = json.loads(self.memory_path.read_text(encoding="utf-8"))
         except Exception:
             return ""
+        bullets = _normalise_memory_list(bullets)
         if not bullets:
             return ""
         lines = ["<memory>", "Correction notes from past experience:"]

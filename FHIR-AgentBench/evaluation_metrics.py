@@ -14,7 +14,6 @@ from utils import is_reasoning_llm
 import pandas as pd
 from tqdm import tqdm
 import numpy as np
-import litellm
 
 
 from utils.metrics_utils import (
@@ -52,7 +51,7 @@ args = parser.parse_args()
 
 
 # Setup LiteLLM
-from utils.core_utils import setup_api_keys
+from utils.core_utils import get_litellm, setup_api_keys
 
 def setup_environment():
     """Setup environment and configuration"""
@@ -60,6 +59,7 @@ def setup_environment():
         raise ValueError("OpenAI API key not found. Please set OPENAI_API_KEY environment variable or add it to config.yml")
     
     # Configure LiteLLM
+    litellm = get_litellm()
     litellm.suppress_debug_info = True
     litellm.set_verbose = False
     
@@ -74,6 +74,7 @@ def setup_environment():
 def call_model(model, prompt):
     """Call LLM with appropriate settings"""
     try:
+        litellm = get_litellm()
         model_mapping = {
             "o4-mini": "o4-mini"
         }

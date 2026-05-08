@@ -35,12 +35,15 @@ Output is plain prose starting with `"when asked ..."` — task-specific conditi
 
 Note: the Evo comparator's baseline is a **protocol-only baseline**. Even before any episodic or semantic memory exists, the agent receives the Evo memory-guided reasoning protocol ("use memory as strategy guidance, not answer lookup; prefer current task details; reuse portable workflows"). Later epochs add retrieved rules/episodes on top of that fixed protocol, so Evo learning curves should be interpreted as memory accumulation relative to the Evo protocol baseline, not as a prompt-identical baseline to `memory_cycle`.
 
+**`skillx_cycle`** — SkillX extraction-based comparator (arXiv 2604.04804, ZJUNLP/Ant Group). Instead of editing skills in response to failures, it distills *successful* trajectories into a hierarchical skill library using a two-stage pipeline: (1) a `FunctionalSkillExtractor` LLM call decomposes each successful trace into step-level reusable skills; (2) a `TwoStageFilterPipeline` keeps only high-signal skills (general quality filter; tool-schema validation skipped as it requires benchmark-specific schemas). Extracted skills are merged into a persistent `skillx_library.json` after each epoch. At inference, top-k skills are retrieved via BM25 overlap and injected as a `<skillx_memory>` block. Available in MedAgentBench, MedAgentBench-v2, and FHIR-AgentBench. Requires the SkillX repo at `/home/moll/skill-agent-dev/SkillX` (configured via `skillx.skillx_dir`).
+
 | Comparator | Learned artifact | Update source | Selection mechanism |
 |---|---|---|---|
 | `skill_cycle` | Markdown skills | Failure traces | Probe-scored fixes minus regressions |
 | `memory_cycle` | Flat correction notes | Individual failures | Append all |
 | `batch_memory_cycle` | Flat correction notes | Batch failures | Append all |
 | `evo_memory_cycle` | Episodic examples + semantic rules | Completed dev episodes with eval feedback | Top-k retrieval + rule utility |
+| `skillx_cycle` | Hierarchical functional skill library | Successful dev episodes | BM25 retrieval |
 
 ---
 
@@ -549,6 +552,30 @@ The `update_every` and `batch_concurrency` keys are used only by the batch varia
 
 ---
 
+### SkillX cycle
+
+Requires the SkillX repo cloned alongside the benchmarks (`/home/moll/skill-agent-dev/SkillX`). Set `skillx.skillx_dir` in the config to the repo root. Not available for AgentBench (no sequential run structure for epoch-level extraction).
+
+```bash
+# MedAgentBench
+python -m src.skillx_cycle --config configs/skillx_cycle.yaml --run-name skillx_001
+
+# MedAgentBench-v2
+python -m src.skillx_cycle --config configs/skillx_cycle.yaml --run-name skillx_001
+
+# FHIR-AgentBench
+python skillx_cycle.py --config configs/skillx_cycle.yaml --run-name skillx_001
+```
+
+Output per epoch includes `epoch_N/skillx_updates.json` (`n_successful`, `n_extracted`, `n_filtered`, `n_after_merge`) and a shared `skillx_library.json` in the run root. Val scores are tracked in `val_scores.json` matching all other comparators.
+
+| Benchmark | Skill agent | Skill storage | Extraction trigger |
+|---|---|---|---|
+| MedAgentBench / MedAgentBench-v2 | `SkillXAwareAgent` wrapping base agent | `skillx_library.json` injected as `<skillx_memory>` block | Once per epoch on all successful dev traces |
+| FHIR-AgentBench | Skill block prepended to agent `system_msg` per run | same | Once per epoch on all successful dev traces |
+
+---
+
 ## Data splits
 
 | Benchmark | Dev | Val | Test | Split strategy |
@@ -785,3 +812,14 @@ An Evo-Memory-style comparator is added alongside the flat memory comparators. I
 - **Curator updates:** after every non-error dev episode, the updater LLM reflects with eval feedback and emits `episodic_summary`, `failure_analysis`, `action_guidelines`, and `tags`.
 - **No probe gate:** unlike `skill_cycle`, Evo memory updates are not accepted or rejected via probe scoring. This keeps the comparator focused on retrieved structured memory rather than validated skill mutation.
 - **Injection point:** AgentBench-style repos use `EvoMemoryAwareAgent`, mirroring skill/memory injection: prefix on the first decision and suffix on continuation turns. FHIR-AgentBench injects the retrieved memory block into the native agent system prompt.
+
+### 10. SkillX comparator — extraction-based functional skill library
+**Files:**
+- `MedAgentBench/src/skillx/`, `MedAgentBench/src/skillx_cycle.py`, `MedAgentBench/configs/skillx_cycle.yaml`
+- `MedAgentBench-v2/src/skillx/`, `MedAgentBench-v2/src/skillx_cycle.py`, `MedAgentBench-v2/configs/skillx_cycle.yaml`
+- `FHIR-AgentBench/skill_learning/skillx/`, `FHIR-AgentBench/skill_learning/skillx_cycle.py`
+- `FHIR-AgentBench/skillx_cycle.py`, `FHIR-AgentBench/configs/skillx_cycle.yaml`
+
+SkillX (arXiv 2604.04804) distills successful agent trajectories into a hierarchical skill library via LLM extraction rather than GRPO-style editing. After every epoch, all successful dev traces are passed to a `FunctionalSkillExtractor` which decomposes each trace into step-level pseudocode skills (one LLM call per plan step). A `TwoStageFilterPipeline` removes low-quality skills (general quality filter; tool-schema stage 2 skipped). Filtered skills are merged into a `SkillLibrary` via `library.merge()` (update existing by name, add new). At inference, top-k skills are retrieved by BM25 overlap and injected as a `<skillx_memory>` block.
+
+The SkillX `SkillX/pipeline.py` entry point is never imported (it requires `langchain_openai`). Only the submodules (`extraction/`, `filtering/`, `core/`) are used directly, with `SkillXLLMAdapter` bridging the sync agent to the async `ainvoke()` interface they expect.

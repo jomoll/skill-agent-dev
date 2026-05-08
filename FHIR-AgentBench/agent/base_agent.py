@@ -1,6 +1,5 @@
 import sys
 import os
-import litellm
 
 # Add parent directory to path to import utils
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
