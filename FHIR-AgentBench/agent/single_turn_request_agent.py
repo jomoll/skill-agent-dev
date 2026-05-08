@@ -15,8 +15,9 @@ class SingleTurnRequestAgent(BaseAgent):
         base_url=None,
         timeout: int = 20,
         max_retries: int = 3,
+        max_tokens: int = 65536,
     ):
-        super().__init__(model, verbose, base_url, timeout=timeout, max_retries=max_retries)
+        super().__init__(model, verbose, base_url, timeout=timeout, max_retries=max_retries, max_tokens=max_tokens)
 
         all_tools = get_tool_definitions()
         self.tools = [tool for tool in all_tools if tool["function"]["name"] in 
@@ -66,11 +67,12 @@ Follow these examples to structure your approach: make appropriate FHIR requests
             base_url=self.base_url,
             timeout=self.timeout,
             max_retries=self.max_retries,
+            max_tokens=self.max_tokens,
         )
-        
+
         self.messages.append(response_message)
         self._update_usage(usage_info)
-        
+
         if error:
             return {
                 "retrieved_fhir_resources": retrieved_resources,
@@ -131,8 +133,9 @@ Follow these examples to structure your approach: make appropriate FHIR requests
             base_url=self.base_url,
             timeout=self.timeout,
             max_retries=self.max_retries,
+            max_tokens=self.max_tokens,
         )
-            
+
         self.messages.append(final_message)
         self._update_usage(final_usage_info)
         

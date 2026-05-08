@@ -276,6 +276,7 @@ def create_agent(
     base_url=None,
     timeout=20,
     max_retries=3,
+    max_tokens=65536,
 ):
     """Create agent instance based on strategy."""
     agents = {
@@ -285,20 +286,21 @@ def create_agent(
         "multi_turn_resource": ("agent.multi_turn_resource_agent", "MultiTurnResourceAgent"),
         "multi_turn_code_resource": ("agent.multi_turn_code_resource_agent", "MultiTurnCodeResourceAgent")
     }
-    
+
     if agent_strategy not in agents:
         raise ValueError(f"Unknown agent strategy: {agent_strategy}")
-    
+
     module_name, class_name = agents[agent_strategy]
     module = __import__(module_name, fromlist=[class_name])
     agent_class = getattr(module, class_name)
-    
+
     return agent_class(
         model=model,
         verbose=verbose,
         base_url=base_url,
         timeout=timeout,
         max_retries=max_retries,
+        max_tokens=max_tokens,
     )
 
 

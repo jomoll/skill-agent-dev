@@ -35,6 +35,7 @@ def create_skill_aware_fhir_agent(
     skill_repo: SkillRepository,
     timeout: int = 20,
     max_retries: int = 3,
+    max_tokens: int = 65536,
 ):
     agent = create_agent(
         agent_strategy,
@@ -43,6 +44,7 @@ def create_skill_aware_fhir_agent(
         base_url=base_url,
         timeout=timeout,
         max_retries=max_retries,
+        max_tokens=max_tokens,
     )
     skill_block = render_skills(skill_repo)
     if not skill_block:

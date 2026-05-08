@@ -75,6 +75,7 @@ def create_memory_aware_fhir_agent(
     memory_path: Path,
     timeout: int = 20,
     max_retries: int = 3,
+    max_tokens: int = 65536,
 ):
     """Create a FHIR agent that injects the current memory block into system_msg."""
     import sys
@@ -88,6 +89,7 @@ def create_memory_aware_fhir_agent(
         base_url=base_url,
         timeout=timeout,
         max_retries=max_retries,
+        max_tokens=max_tokens,
     )
     memory_block = _render_memory(memory_path)
     if not memory_block:
@@ -278,6 +280,7 @@ class FHIRBatchMemoryCycleRunner:
         self.verbose_agent = bool(agent_cfg.get("verbose", False))
         self.agent_timeout = int(agent_cfg.get("timeout", 20))
         self.agent_max_retries = int(agent_cfg.get("max_retries", 3))
+        self.agent_max_tokens = int(agent_cfg.get("max_tokens", 65536))
 
         if agent_cfg.get("project_id"):
             os.environ["VERTEXAI_PROJECT"] = str(agent_cfg["project_id"])
@@ -289,7 +292,7 @@ class FHIRBatchMemoryCycleRunner:
             model=updater_cfg.get("model", self.agent_model),
             base_url=updater_cfg.get("base_url", self.agent_base_url),
             temperature=float(updater_cfg.get("temperature", 0.0)),
-            max_tokens=int(updater_cfg.get("max_tokens", 128000)),
+            max_tokens=int(updater_cfg.get("max_tokens", 32768)),
             timeout=int(updater_cfg.get("timeout", 20)),
             max_retries=int(updater_cfg.get("max_retries", 3)),
         )
@@ -301,6 +304,7 @@ class FHIRBatchMemoryCycleRunner:
             cache_path=self.run_dir / "eval_cache.json",
             timeout=int(eval_cfg.get("timeout", 20)),
             max_retries=int(eval_cfg.get("max_retries", 3)),
+            max_tokens=int(eval_cfg.get("max_tokens", 65536)),
         )
 
         cycle_cfg = config["cycle"]
@@ -624,6 +628,7 @@ class FHIRBatchMemoryCycleRunner:
             memory_path=self.memory_path,
             timeout=self.agent_timeout,
             max_retries=self.agent_max_retries,
+            max_tokens=self.agent_max_tokens,
         )
         try:
             raw_output = agent.run(sample["question_with_context"])

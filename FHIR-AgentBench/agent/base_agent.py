@@ -24,10 +24,11 @@ class BaseAgent:
         base_url=None,
         timeout: int = 20,
         max_retries: int = 3,
+        max_tokens: int = 65536,
     ):
         """
         Initialize the base agent.
-        
+
         Args:
             model (str): The LLM model to use
             verbose (bool): Whether to print debug information
@@ -38,6 +39,7 @@ class BaseAgent:
         self.base_url = base_url
         self.timeout = timeout
         self.max_retries = max_retries
+        self.max_tokens = max_tokens
         
         # Initialize usage tracking
         self.total_usage = {

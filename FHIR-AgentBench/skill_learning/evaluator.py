@@ -21,11 +21,13 @@ class FHIRSampleEvaluator:
         base_url: Optional[str] = None,
         timeout: int = 20,
         max_retries: int = 3,
+        max_tokens: int = 65536,
     ) -> None:
         self.model = model
         self.base_url = base_url
         self.timeout = timeout
         self.max_retries = max_retries
+        self.max_tokens = max_tokens
         self.cache_path = Path(cache_path)
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
         self.cache: Dict[str, bool] = {}
@@ -97,6 +99,7 @@ Return 1 or 0."""
                     temperature=0.0,
                     max_retries=self.max_retries,
                     timeout=self.timeout,
+                    max_tokens=self.max_tokens,
                 )
                 if error:
                     raise RuntimeError(error)
