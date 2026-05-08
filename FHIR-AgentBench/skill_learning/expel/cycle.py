@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import random
 import traceback
@@ -8,109 +9,80 @@ from typing import Any, Dict, List
 
 from skill_learning.agent import LiteLLMAgent, format_agent_actions, serialize_message
 from skill_learning.memory_cycle import FHIRBatchMemoryCycleRunner
-from skill_learning.skillx.lm_adapter import SkillXLLMAdapter
-from skill_learning.skillx.pipeline_adapter import SkillXPipelineAdapter
+from skill_learning.expel.lm_adapter import ExPeLLMAdapter
+from skill_learning.expel.pipeline_adapter import ExPeLPipelineAdapter
 
 
-def _inject_skillx(agent: Any, skill_block: str) -> Any:
-    """Prepend skill block to the agent's system message."""
-    import copy
-    if not skill_block:
+def _inject_expel(agent: Any, rule_block: str) -> Any:
+    """Prepend rule block to the agent's system message."""
+    if not rule_block:
         return agent
     system_msg = copy.deepcopy(getattr(agent, "system_msg", []))
     if system_msg and isinstance(system_msg[0], dict):
         system_msg[0]["content"] = (
             str(system_msg[0].get("content", "")).rstrip()
             + "\n\n---\n"
-            + skill_block
+            + rule_block
         )
         agent.system_msg = system_msg
     return agent
 
 
-class FHIRSkillXCycleRunner(FHIRBatchMemoryCycleRunner):
-    """SkillX extraction-based skill comparator for FHIR-AgentBench.
+class FHIRExPeLCycleRunner(FHIRBatchMemoryCycleRunner):
+    """ExpeL contrastive-rule comparator for FHIR-AgentBench.
 
-    Runs SkillX extraction on successful dev traces at the end of each epoch.
-    Injects retrieved skills into the system prompt at inference.
+    Runs ExpeL critique pipeline on dev traces at the end of each epoch.
+    Injects extracted rules into the agent system prompt at inference.
     """
 
     def __init__(self, config: Dict, run_dir: Path) -> None:
         super().__init__(config=config, run_dir=run_dir)
 
-        library_path = self.run_dir / "skillx_library.json"
-        skillx_cfg = config.get("skillx", {})
-        self.skillx_top_k: int = skillx_cfg.get("retrieval_top_k", 5)
-
+        expel_cfg = config.get("expel", {})
         updater_cfg = config.get("updater", {})
         updater_agent = LiteLLMAgent(
             model=updater_cfg.get("model", self.agent_model),
             base_url=updater_cfg.get("base_url", self.agent_base_url),
             temperature=float(updater_cfg.get("temperature", 0.7)),
         )
-        lm_adapter = SkillXLLMAdapter(updater_agent)
+        lm_adapter = ExPeLLMAdapter(updater_agent)
 
-        self.skillx_adapter = SkillXPipelineAdapter(
+        self.expel_adapter = ExPeLPipelineAdapter(
             lm_adapter=lm_adapter,
-            library_path=library_path,
-            config=skillx_cfg,
+            rules_path=self.run_dir / "expel_rules.json",
+            store_path=self.run_dir / "expel_store.json",
+            config=expel_cfg,
         )
 
     def _run_inner(self) -> None:
         super()._run_inner()
-        n = len(self.skillx_adapter.get_skills())
-        print(f"[FHIRSkillXCycle] Final library: {n} functional skill(s)")
+        print(f"[FHIRExPeLCycle] Final rule count: {len(self.expel_adapter.rules)}")
 
     def _maybe_update_best_checkpoint(self, val_score: float, label: Any) -> None:
         if val_score > self._best_val_score:
             self._best_val_score = val_score
             self._best_checkpoint_label = label
-            library_path = self.run_dir / "skillx_library.json"
-            best_path = self.run_dir / "skillx_library_best.json"
-            if library_path.exists():
-                import shutil
-                shutil.copy2(library_path, best_path)
+            import shutil
+            for fname in ("expel_rules.json", "expel_store.json"):
+                src = self.run_dir / fname
+                if src.exists():
+                    shutil.copy2(src, self.run_dir / fname.replace(".json", "_best.json"))
             print(
                 f"[BestCheckpoint] New best: epoch={label}, val={val_score:.1%} — "
-                "SkillX library snapshot saved"
+                "ExpeL rules snapshot saved"
             )
 
     def _run_epoch(self, epoch: int, epoch_dir: Path) -> List[Dict]:
         rng = random.Random(epoch)
         dev = self.dev_data[:]
         rng.shuffle(dev)
-        print(f"[Epoch {epoch}] {len(dev)} dev samples — SkillX extraction after epoch")
+        print(f"[Epoch {epoch}] {len(dev)} dev samples — ExpeL critique after epoch")
 
         all_entries: List[Dict] = []
         dev_runs_path = epoch_dir / "dev_runs.jsonl"
-        sample_by_id = {str(sample.get("question_id")): sample for sample in dev}
-        completed_by_id: Dict[str, Dict] = {}
-
-        if self.resume and dev_runs_path.exists():
-            with dev_runs_path.open(encoding="utf-8") as f:
-                for line in f:
-                    try:
-                        entry = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    sid = str(entry.get("sample_id"))
-                    if sid not in sample_by_id or sid in completed_by_id:
-                        continue
-                    completed_by_id[sid] = entry
-            if completed_by_id:
-                print(
-                    f"[Resume] loaded {len(completed_by_id)}/{len(dev)} "
-                    f"completed dev samples from {dev_runs_path}",
-                    flush=True,
-                )
-        else:
-            dev_runs_path.touch(exist_ok=True)
+        dev_runs_path.touch(exist_ok=True)
 
         for sample_idx, sample in enumerate(dev):
-            sample_id = str(sample.get("question_id"))
-            if sample_id in completed_by_id:
-                all_entries.append(completed_by_id[sample_id])
-                continue
             try:
                 entry = self._run_one(sample, update_cycle=sample_idx)
             except BaseException as exc:
@@ -135,15 +107,15 @@ class FHIRSkillXCycleRunner(FHIRBatchMemoryCycleRunner):
                 safe = {k: v for k, v in entry.items() if not k.startswith("_")}
                 f.write(json.dumps(safe, default=str) + "\n")
 
-        stats = self.skillx_adapter.run_epoch(all_entries)
+        stats = self.expel_adapter.run_epoch(all_entries)
         stats["epoch"] = epoch
-        with (epoch_dir / "skillx_updates.json").open("w", encoding="utf-8") as f:
+        with (epoch_dir / "expel_updates.json").open("w", encoding="utf-8") as f:
             json.dump(stats, f, indent=2, ensure_ascii=False)
 
         n_correct = sum(bool(e.get("is_correct")) for e in all_entries)
         print(
             f"[Epoch {epoch}] Dev score: {n_correct}/{len(all_entries)} | "
-            f"Skills extracted: {stats['n_extracted']}, total: {stats['n_after_merge']}"
+            f"Rules: {stats['n_rules']} (pairs critiqued: {stats['n_pairs_critiqued']})"
         )
         return all_entries
 
@@ -161,10 +133,8 @@ class FHIRSkillXCycleRunner(FHIRBatchMemoryCycleRunner):
             timeout=self.agent_timeout,
             max_retries=self.agent_max_retries,
         )
-        skill_block = self.skillx_adapter.build_skill_block(
-            sample["question_with_context"], top_k=self.skillx_top_k
-        )
-        agent = _inject_skillx(agent, skill_block)
+        rule_block = self.expel_adapter.build_rule_block()
+        agent = _inject_expel(agent, rule_block)
 
         try:
             raw_output = agent.run(sample["question_with_context"])

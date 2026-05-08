@@ -35,7 +35,9 @@ Output is plain prose starting with `"when asked ..."` — task-specific conditi
 
 Note: the Evo comparator's baseline is a **protocol-only baseline**. Even before any episodic or semantic memory exists, the agent receives the Evo memory-guided reasoning protocol ("use memory as strategy guidance, not answer lookup; prefer current task details; reuse portable workflows"). Later epochs add retrieved rules/episodes on top of that fixed protocol, so Evo learning curves should be interpreted as memory accumulation relative to the Evo protocol baseline, not as a prompt-identical baseline to `memory_cycle`.
 
-**`skillx_cycle`** — SkillX extraction-based comparator (arXiv 2604.04804, ZJUNLP/Ant Group). Instead of editing skills in response to failures, it distills *successful* trajectories into a hierarchical skill library using a two-stage pipeline: (1) a `FunctionalSkillExtractor` LLM call decomposes each successful trace into step-level reusable skills; (2) a `TwoStageFilterPipeline` keeps only high-signal skills (general quality filter; tool-schema validation skipped as it requires benchmark-specific schemas). Extracted skills are merged into a persistent `skillx_library.json` after each epoch. At inference, top-k skills are retrieved via BM25 overlap and injected as a `<skillx_memory>` block. Available in MedAgentBench, MedAgentBench-v2, and FHIR-AgentBench. Requires the SkillX repo at `/home/moll/skill-agent-dev/SkillX` (configured via `skillx.skillx_dir`).
+**`skillx_cycle`** — SkillX extraction-based comparator (arXiv 2604.04804, ZJUNLP/Ant Group). Instead of editing skills in response to failures, it distills *successful* trajectories into a hierarchical skill library using a two-stage pipeline: (1) a `FunctionalSkillExtractor` LLM call decomposes each successful trace into step-level reusable skills; (2) a `TwoStageFilterPipeline` keeps only high-signal skills (general quality filter; tool-schema validation skipped as it requires benchmark-specific schemas). Extracted skills are merged into a persistent `skillx_library.json` after each epoch. At inference, top-k skills are retrieved via BM25 overlap and injected as a `<skillx_memory>` block. Available in MedAgentBench, MedAgentBench-v2, and FHIR-AgentBench. The required SkillX classes are vendored into `src/skillx/vendor/` — no external repo dependency.
+
+**`expel_cycle`** — ExpeL contrastive-rule comparator (arXiv 2308.10144, AAAI 2024). Unlike the memory and skill comparators, ExpeL learns from the *contrast* between successful and failed trajectories. After each epoch, an LLM compares (success, failure) pairs and emits AGREE/REMOVE/EDIT/ADD operations on a growing numbered rule list; a separate all-success critique extracts rules from successful runs alone. Rules carry a counter (ADD: +2, AGREE/EDIT: +1, REMOVE: −1/−3); rules with counter ≤ 0 are dropped and remaining rules are sorted by counter descending. At inference, the current rule list is injected as a numbered block into the agent context. Available in MedAgentBench, MedAgentBench-v2, and FHIR-AgentBench. Implemented as a self-contained vendored module — no external ExpeL repo dependency.
 
 | Comparator | Learned artifact | Update source | Selection mechanism |
 |---|---|---|---|
@@ -44,6 +46,7 @@ Note: the Evo comparator's baseline is a **protocol-only baseline**. Even before
 | `batch_memory_cycle` | Flat correction notes | Batch failures | Append all |
 | `evo_memory_cycle` | Episodic examples + semantic rules | Completed dev episodes with eval feedback | Top-k retrieval + rule utility |
 | `skillx_cycle` | Hierarchical functional skill library | Successful dev episodes | BM25 retrieval |
+| `expel_cycle` | Numbered contrastive rule list | Success + failure dev episode pairs | Rule injection (decreasing-counter order) |
 
 ---
 
@@ -554,7 +557,7 @@ The `update_every` and `batch_concurrency` keys are used only by the batch varia
 
 ### SkillX cycle
 
-Requires the SkillX repo cloned alongside the benchmarks (`/home/moll/skill-agent-dev/SkillX`). Set `skillx.skillx_dir` in the config to the repo root. Not available for AgentBench (no sequential run structure for epoch-level extraction).
+Not available for AgentBench (no sequential run structure for epoch-level extraction). The required SkillX classes are vendored — no external repo is needed.
 
 ```bash
 # MedAgentBench
@@ -573,6 +576,33 @@ Output per epoch includes `epoch_N/skillx_updates.json` (`n_successful`, `n_extr
 |---|---|---|---|
 | MedAgentBench / MedAgentBench-v2 | `SkillXAwareAgent` wrapping base agent | `skillx_library.json` injected as `<skillx_memory>` block | Once per epoch on all successful dev traces |
 | FHIR-AgentBench | Skill block prepended to agent `system_msg` per run | same | Once per epoch on all successful dev traces |
+
+---
+
+### ExpeL cycle
+
+Not available for AgentBench. No external repo required — ExpeL classes are self-contained in each benchmark's `expel/vendor/`.
+
+```bash
+# MedAgentBench
+cd MedAgentBench && conda activate medagentbench
+python -m src.expel_cycle --config configs/expel_cycle.yaml --run-name expel_001
+
+# MedAgentBench-v2
+cd MedAgentBench-v2 && conda activate medagentbench
+python -m src.expel_cycle --config configs/expel_cycle.yaml --run-name expel_001
+
+# FHIR-AgentBench
+cd FHIR-AgentBench && conda activate fhir-agentbench
+python expel_cycle.py --config configs/expel_cycle.yaml --run-name expel_001
+```
+
+Output per epoch includes `epoch_N/expel_updates.json` (`n_successes`, `n_failures`, `n_pairs_critiqued`, `n_rules`) and shared `expel_rules.json` + `expel_store.json` in the run root. When val score improves, `expel_rules_best.json` and `expel_store_best.json` are snapshot-saved alongside the main files.
+
+| Benchmark | Rule injection | Rule storage | Update trigger |
+|---|---|---|---|
+| MedAgentBench / MedAgentBench-v2 | `ExPeLAwareAgent` prepends rule block on first turn | `expel_rules.json` (numbered list with counters) | Once per epoch: compare + all-success critiques |
+| FHIR-AgentBench | Rule block prepended to agent `system_msg` per run | same | Once per epoch: compare + all-success critiques |
 
 ---
 
@@ -841,3 +871,30 @@ The SkillX `SkillX/pipeline.py` entry point is never imported (it requires `lang
 - `TwoStageFilterPipeline` stage 1 quality filter applied
 - `SkillMerger.merge_clusters()` called on same-name duplicates (LLM-based dedup, no embeddings needed)
 - `SkillLibrary.merge()` for dedup-by-name library updates; `Skill` and `SkillLibrary` JSON schema identical to upstream
+
+### 11. ExpeL comparator — contrastive rule extraction
+**Files:**
+- `MedAgentBench/src/expel/`, `MedAgentBench/src/expel_cycle.py`, `MedAgentBench/configs/expel_cycle.yaml`
+- `MedAgentBench-v2/src/expel/`, `MedAgentBench-v2/src/expel_cycle.py`, `MedAgentBench-v2/configs/expel_cycle.yaml`
+- `FHIR-AgentBench/skill_learning/expel/`, `FHIR-AgentBench/expel_cycle.py`, `FHIR-AgentBench/configs/expel_cycle.yaml`
+
+ExpeL (arXiv 2308.10144, AAAI 2024) extracts reusable rules by having an LLM compare successful and failed task trajectories and emit AGREE/REMOVE/EDIT/ADD operations on a growing numbered rule list. Rules carry integer counters; ADD starts at +2, AGREE/EDIT add +1, REMOVE subtracts 1 (or 3 when the list is full). Rules with counter ≤ 0 are dropped; the remainder are sorted descending. At inference, the rule list is injected as a numbered context block.
+
+Per epoch: (1) all dev entries are added to an `ExperienceStore` keyed by success/failure; (2) for each failure, the nearest-matched success is found by BM25 overlap and the pair is sent to a compare-critique LLM call; (3) all successes in the epoch trigger one all-success critique call (capped at 10 histories); (4) collected operations are applied via `update_rules()`.
+
+**Adaptations from upstream ExpeL (arXiv 2308.10144):**
+
+| Upstream feature | Our adaptation | Reason |
+|---|---|---|
+| Reflexion retry loops as failure source | Single-attempt success/failure pairs | Benchmarks are single-shot per task |
+| FAISS semantic exemplar retrieval | BM25 lexical overlap | No embedding server reliably available |
+| k-fold cross-validation loop | Dev/val epoch structure | Already handled by base runner |
+| AlfWorld/HotpotQA system prompts | FHIR/medical-task framing | Domain adaptation |
+| `langchain` LLM interface | `ExPeLLMAdapter` async bridge | Consistent with SkillX adapter pattern |
+
+**What is faithful to upstream:**
+- `parse_rules()` regex and operation format (AGREE/REMOVE/EDIT/ADD + number) verbatim from upstream
+- Counter values: ADD +2, AGREE/EDIT +1, REMOVE −1 (−3 if list full) from `ExpeL/agent/expel.py` lines 696–743
+- `update_rules()` processing order and list-full gate
+- `HUMAN_CRITIQUE_COMPARE_TEMPLATE` / `HUMAN_CRITIQUE_SUCCESS_TEMPLATE` / `FORMAT_RULES_OPERATION_TEMPLATE` / `CRITIQUE_SUFFIX` adapted from `ExpeL/prompts/templates/human.py`
+- `max_num_rules` cap (default 20) and list-full flag — same ExpeL default
