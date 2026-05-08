@@ -105,10 +105,10 @@ def update_rules(
             elif op == "ADD":
                 rules.append([text, 2])
 
-    # Drop rules with counter <= 0; sort descending by counter
+    # Drop rules with counter <= 0; sort descending by counter; cap at max_num_rules
     rules = [r for r in rules if r[1] > 0]
     rules.sort(key=lambda r: r[1], reverse=True)
-    return [(r[0], r[1]) for r in rules]
+    return [(r[0], r[1]) for r in rules[:max_num_rules]]
 
 
 def format_rules(rules: List[Tuple[str, int]]) -> str:
