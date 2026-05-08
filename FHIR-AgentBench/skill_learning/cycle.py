@@ -137,6 +137,7 @@ class FHIRSkillCycleRunner:
         self.grpo_k = int(cycle_cfg.get("grpo_k", 4))
         self.grpo_eval_n = int(cycle_cfg.get("grpo_eval_n", 20))
         self.run_baseline = bool(cycle_cfg.get("run_baseline", True))
+        self.seed: int = int(cycle_cfg.get("seed", 0))
         self.max_proposals = int(cycle_cfg.get("max_proposals", 1))
         self.max_learned_skills = int(cycle_cfg.get("max_learned_skills", 10))
         self.non_learnable_labels = [
@@ -316,7 +317,7 @@ class FHIRSkillCycleRunner:
         prev_results: Optional[Dict[str, bool]],
         prev_taxonomy: Dict[str, str],
     ) -> Tuple[List[Dict], Dict[str, str]]:
-        rng = random.Random(epoch)
+        rng = random.Random(self.seed * 1_000_000 + epoch)
         dev = self.dev_data[:]
         rng.shuffle(dev)
         batches = [dev[i:i + self.update_every] for i in range(0, len(dev), self.update_every)]
@@ -501,7 +502,7 @@ class FHIRSkillCycleRunner:
             event["reason"] = "no_valid_proposals"
             return event
 
-        rng = random.Random(epoch * 1000 + update_cycle)
+        rng = random.Random(self.seed * 1_000_000 + epoch * 1_000 + update_cycle)
         probe, probe_failing_ids = self._build_probe_set(
             all_entries=all_entries,
             prev_results=prev_results,
