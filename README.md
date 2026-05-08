@@ -822,4 +822,22 @@ An Evo-Memory-style comparator is added alongside the flat memory comparators. I
 
 SkillX (arXiv 2604.04804) distills successful agent trajectories into a hierarchical skill library via LLM extraction rather than GRPO-style editing. After every epoch, all successful dev traces are passed to a `FunctionalSkillExtractor` which decomposes each trace into step-level pseudocode skills (one LLM call per plan step). A `TwoStageFilterPipeline` removes low-quality skills (general quality filter; tool-schema stage 2 skipped). Filtered skills are merged into a `SkillLibrary` via `library.merge()` (update existing by name, add new). At inference, top-k skills are retrieved by BM25 overlap and injected as a `<skillx_memory>` block.
 
-The SkillX `SkillX/pipeline.py` entry point is never imported (it requires `langchain_openai`). Only the submodules (`extraction/`, `filtering/`, `core/`) are used directly, with `SkillXLLMAdapter` bridging the sync agent to the async `ainvoke()` interface they expect.
+The SkillX `SkillX/pipeline.py` entry point is never imported (it requires `langchain_openai`). Only the submodules (`extraction/`, `filtering/`, `clustering/`, `core/`) are used directly, with `SkillXLLMAdapter` bridging the sync agent to the async `ainvoke()` interface they expect.
+
+**Adaptations from upstream SkillX (arXiv 2604.04804):**
+
+| Upstream feature | Our adaptation | Reason |
+|---|---|---|
+| `IterativeSkillPipeline` orchestrator | Custom `SkillXPipelineAdapter` | `pipeline.py` requires `langchain_openai` (not installed) |
+| DBSCAN + embedding retrieval (`SkillRetriever`) | BM25 lexical overlap | Qwen3-Embedding-8B server (port 7000) not reliably available |
+| Stage 2 tool-schema filter | Always skipped (`skip_stage2=True`) | FHIR/MedAgentBench tool schemas not pre-loaded |
+| Atomic skill extraction | Functional only | Our benchmarks lack per-tool omission detection needed for atomic |
+| Tool-response summarisation | Not implemented | Adds per-step LLM calls; marginal benefit for FHIR/MedAgentBench |
+| Plan library (planning skills) | Not stored | Plans are per-trajectory, not reused across tasks in our setting |
+
+**What is faithful to upstream:**
+- `PlanExtractor` called to generate real multi-step plans before skill extraction (one LLM call per trajectory)
+- `FunctionalSkillExtractor` called per plan step using the same upstream prompt template
+- `TwoStageFilterPipeline` stage 1 quality filter applied
+- `SkillMerger.merge_clusters()` called on same-name duplicates (LLM-based dedup, no embeddings needed)
+- `SkillLibrary.merge()` for dedup-by-name library updates; `Skill` and `SkillLibrary` JSON schema identical to upstream
