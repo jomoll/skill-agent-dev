@@ -349,6 +349,7 @@ class SkillCycleRunner:
         self.grpo_k: int = cycle_cfg.get("grpo_k", 4)
         self.grpo_eval_n: int = cycle_cfg.get("grpo_eval_n", 20)  # 10 pass + 10 fail
         self.run_baseline: bool = cycle_cfg.get("run_baseline", True)
+        self.seed: int = cycle_cfg.get("seed", 0)
 
         task_cfg = config["task"]
         self.fhir_api_base: str = task_cfg["fhir_api_base"]
@@ -529,7 +530,7 @@ class SkillCycleRunner:
         epoch_taxonomy: Dict[str, str] = dict(prev_taxonomy or {})
 
         # Shuffle dev set with fixed seed per epoch
-        rng = random.Random(epoch)
+        rng = random.Random(self.seed * 1_000_000 + epoch)
         dev = self.dev_data[:]
         rng.shuffle(dev)
 
@@ -688,7 +689,7 @@ class SkillCycleRunner:
         )
 
         id_to_sample = {s["id"]: s for s in self.dev_data}
-        rng = random.Random(epoch * 99991)
+        rng = random.Random(self.seed * 1_000_000 + epoch * 99991)
         half = self.grpo_eval_n // 2
         type_key = lambda s: s.get("type", "other")
         failing = [e for e in all_entries if not e["is_correct"]]
@@ -771,7 +772,7 @@ class SkillCycleRunner:
         update_cycle: int,
         prev_taxonomy: Optional[Dict[str, str]] = None,
     ):
-        rng = random.Random(epoch * 1000 + update_cycle)
+        rng = random.Random(self.seed * 1_000_000 + epoch * 1000 + update_cycle)
         id_to_sample = {s["id"]: s for s in self.dev_data}
 
         probe_set, probe_failing_ids = self._build_probe_set(

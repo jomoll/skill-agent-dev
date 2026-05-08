@@ -9,6 +9,10 @@ Usage:
     python -m src.run_eval --config configs/skill_cycle.yaml --split test \\
         --skills-dir outputs/skill_cycle/run_001/skills/best --run-name run_001_best_test
 
+    # Resume an interrupted run
+    python -m src.run_eval --config configs/skill_cycle.yaml --split test \\
+        --run-name base_test --resume
+
 The task worker must already be running before invoking this script.
 """
 
@@ -18,6 +22,7 @@ import json
 import shutil
 import sys
 import tempfile
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -53,6 +58,17 @@ def _run_one(sample, index, task_client, agent, fhir_api_base):
     }
 
 
+def _load_completed(jsonl_path: Path) -> dict:
+    completed = {}
+    if jsonl_path.exists():
+        for line in jsonl_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line:
+                entry = json.loads(line)
+                completed[str(entry["sample_id"])] = entry
+    return completed
+
+
 def main():
     parser = argparse.ArgumentParser(description="Evaluate base or skilled agent on a data split")
     parser.add_argument("--config", "-c", type=str, default="configs/skill_cycle.yaml")
@@ -63,7 +79,13 @@ def main():
     )
     parser.add_argument("--run-name", "-n", type=str, default=None)
     parser.add_argument("--force", "-f", action="store_true")
+    parser.add_argument("--resume", "-r", action="store_true",
+                        help="Skip already-completed samples and continue writing to the existing JSONL.")
     args = parser.parse_args()
+
+    if args.force and args.resume:
+        print("--force and --resume are mutually exclusive.", file=sys.stderr)
+        sys.exit(1)
 
     config_path = Path(args.config)
     if not config_path.exists():
@@ -80,8 +102,8 @@ def main():
 
     run_name = args.run_name or datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir = Path("outputs") / "eval" / run_name
-    if run_dir.exists() and not args.force:
-        print(f"Run directory already exists: {run_dir}\nUse --force to overwrite.", file=sys.stderr)
+    if run_dir.exists() and not args.force and not args.resume:
+        print(f"Run directory already exists: {run_dir}\nUse --force to overwrite or --resume to continue.", file=sys.stderr)
         sys.exit(1)
     run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -92,6 +114,13 @@ def main():
     id_to_index = {s["id"]: i for i, s in enumerate(full_data)}
 
     samples = _load_required_json_list(Path(config["data"][split_key]), f"{split_key} split")
+
+    jsonl_path = run_dir / f"{split_key}_runs.jsonl"
+    completed = _load_completed(jsonl_path) if args.resume else {}
+    pending = [s for s in samples if str(s["id"]) not in completed]
+
+    if args.resume:
+        print(f"Resuming: {len(completed)} already done, {len(pending)} remaining.")
 
     task_cfg = config["task"]
     fhir_api_base = task_cfg["fhir_api_base"]
@@ -116,40 +145,43 @@ def main():
     print(f"Task:          {task_cfg['name']}")
     print(f"Concurrency:   {concurrency}")
 
-    results = [None] * len(samples)
-    with ThreadPoolExecutor(max_workers=concurrency) as pool:
-        futures = {
-            pool.submit(_run_one, s, id_to_index[s["id"]], task_client, agent, fhir_api_base): i
-            for i, s in enumerate(samples)
-        }
-        done = 0
-        for future in as_completed(futures):
-            sample_index = futures[future]
-            results[sample_index] = future.result()
-            done += 1
-            if done % 10 == 0 or done == len(samples):
-                n_correct = sum(1 for x in results if x and x["is_correct"])
-                print(f"[{done}/{len(samples)}] correct={n_correct}")
+    write_lock = threading.Lock()
+
+    with open(jsonl_path, "a", encoding="utf-8") as jsonl_f:
+        with ThreadPoolExecutor(max_workers=concurrency) as pool:
+            futures = {
+                pool.submit(_run_one, s, id_to_index[s["id"]], task_client, agent, fhir_api_base): s
+                for s in pending
+            }
+            done = len(completed)
+            total = len(samples)
+            for future in as_completed(futures):
+                entry = future.result()
+                with write_lock:
+                    jsonl_f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                    jsonl_f.flush()
+                    completed[str(entry["sample_id"])] = entry
+                done += 1
+                if done % 10 == 0 or done == total:
+                    n_correct = sum(1 for x in completed.values() if x["is_correct"])
+                    print(f"[{done}/{total}] correct={n_correct}")
 
     if _tmpdir:
         shutil.rmtree(_tmpdir, ignore_errors=True)
 
-    with open(run_dir / f"{split_key}_runs.jsonl", "w", encoding="utf-8") as f:
-        for entry in results:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-
-    n_correct = sum(1 for x in results if x["is_correct"])
+    all_results = list(completed.values())
+    n_correct = sum(1 for x in all_results if x["is_correct"])
     summary = {
         "split": split_key,
-        "score": n_correct / len(results) if results else 0.0,
+        "score": n_correct / len(all_results) if all_results else 0.0,
         "n_correct": n_correct,
-        "n_total": len(results),
+        "n_total": len(all_results),
         "skills_dir": args.skills_dir,
     }
     with open(run_dir / f"{split_key}_score.json", "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
 
-    print(f"Final: {n_correct}/{len(results)} ({summary['score']:.1%})")
+    print(f"Final: {n_correct}/{len(all_results)} ({summary['score']:.1%})")
 
 
 if __name__ == "__main__":

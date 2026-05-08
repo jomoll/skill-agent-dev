@@ -371,6 +371,12 @@ python run_eval.py --config configs/skill_cycle_text.yaml --split test --run-nam
 
 Results are written to `outputs/eval/<run-name>/`. FHIR-AgentBench uses an LLM judge for non-exact-match answers; scores are cached in `outputs/eval/<run-name>/eval_cache.json`.
 
+> **Note:** FHIR-AgentBench eval runs occasionally get stuck (e.g. due to a hung agent or network timeout). If this happens, kill the process and resume from where it left off — completed samples are written incrementally to the JSONL so nothing is lost:
+> ```bash
+> python run_eval.py --config configs/skill_cycle_code.yaml --split test \
+>     --run-name run_001_best_test --resume
+> ```
+
 ### Cross-benchmark skill transfer (FHIR triplet)
 
 Skills learned on one FHIR benchmark can be evaluated on another without any code changes — the skill file format (Markdown + YAML frontmatter) is identical across MedAgentBench, MedAgentBench-v2, and FHIR-AgentBench. Pass `--skills-dir` pointing to the source benchmark's `skills/best/` directory and run `run_eval.py` for the target benchmark as normal. The target benchmark's base skills are still loaded alongside the transferred ones.
