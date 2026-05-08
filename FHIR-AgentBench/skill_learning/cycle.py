@@ -104,6 +104,7 @@ class FHIRSkillCycleRunner:
         self.agent_timeout = int(agent_cfg.get("timeout", 20))
         self.agent_max_retries = int(agent_cfg.get("max_retries", 3))
         self.agent_max_tokens = int(agent_cfg.get("max_tokens", 65536))
+        self.agent_sample_timeout = agent_cfg.get("sample_timeout")  # wall-clock limit per sample (seconds)
         
         if agent_cfg.get("project_id"):
             os.environ["VERTEXAI_PROJECT"] = str(agent_cfg["project_id"])
@@ -995,7 +996,16 @@ class FHIRSkillCycleRunner:
             max_tokens=self.agent_max_tokens,
         )
         try:
-            raw_output = agent.run(sample["question_with_context"])
+            if self.agent_sample_timeout:
+                with ThreadPoolExecutor(max_workers=1) as _pool:
+                    _future = _pool.submit(agent.run, sample["question_with_context"])
+                    try:
+                        raw_output = _future.result(timeout=self.agent_sample_timeout)
+                    except TimeoutError:
+                        _future.cancel()
+                        raise TimeoutError(f"sample wall-clock timeout ({self.agent_sample_timeout}s)")
+            else:
+                raw_output = agent.run(sample["question_with_context"])
             parsed = parse_outputs(raw_output)
         except Exception as e:
             raw_output = {"error": str(e), "trace": []}
