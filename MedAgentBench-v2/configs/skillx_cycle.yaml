@@ -1,0 +1,60 @@
+output_dir: "outputs/skillx_cycle"
+
+agent:
+  module: src.client.agents.HTTPAgent
+  parameters:
+    url: "http://10.32.16.43:4000/chat/completions"
+    headers:
+      Authorization: "Bearer sk--jYBY-YIx5jNQqR0LPgqdQ"
+      Content-Type: "application/json"
+    body:
+      model: "gpt-oss-120b"
+      temperature: 0.0
+      max_tokens: 8192
+    prompter:
+      name: role_content_dict
+      args:
+        agent_role: "assistant"
+
+updater:
+  module: src.client.agents.HTTPAgent
+  parameters:
+    url: "http://10.32.16.43:4000/chat/completions"
+    headers:
+      Authorization: "Bearer sk--jYBY-YIx5jNQqR0LPgqdQ"
+      Content-Type: "application/json"
+    body:
+      model: "gpt-oss-120b"
+      temperature: 0.7
+      max_tokens: 4096
+    prompter:
+      name: role_content_dict
+      args:
+        agent_role: "assistant"
+
+# Task worker (must be running: python -m src.start_task -a --config configs/start_task.yaml --base-port 5071)
+task:
+  name: "medagentbench-v2-skill"
+  controller_address: "http://localhost:5070/api"
+  fhir_api_base: "http://localhost:8080/fhir/"
+
+data:
+  full: "data/medagentbench/new_patient_tasks.json"
+  dev:  "data/medagentbench/split_dev.json"
+  val:  "data/medagentbench/split_val.json"
+
+skillx:
+  skill_type: "functional"
+  retrieval_top_k: 5
+  filter_stage1: true
+  filter_stage2: false        # no tool schemas available; stage 2 always skipped
+  use_plan_extraction: true   # call PlanExtractor to generate real multi-step plans
+  enable_llm_merge: true      # call SkillMerger to LLM-merge same-name duplicates
+
+# Match evo_memory_cycle.yaml hyperparameters for a fair comparison
+cycle:
+  epochs: 5
+  update_every: 42
+  batch_concurrency: 5
+  run_baseline: true
+  seed: 1
