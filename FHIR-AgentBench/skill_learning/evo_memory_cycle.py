@@ -65,9 +65,40 @@ class FHIREvoMemoryCycleRunner(FHIRBatchMemoryCycleRunner):
         all_entries: List[Dict] = []
         updates: List[Dict] = []
         dev_runs_path = epoch_dir / "dev_runs.jsonl"
-        dev_runs_path.touch(exist_ok=True)
+        updates_path = epoch_dir / "evo_memory_updates.json"
+        sample_by_id = {str(sample.get("question_id")): sample for sample in dev}
+        completed_by_id: Dict[str, Dict] = {}
+
+        if self.resume and dev_runs_path.exists():
+            with dev_runs_path.open(encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        entry = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    sid = str(entry.get("sample_id"))
+                    if sid not in sample_by_id or sid in completed_by_id:
+                        continue
+                    completed_by_id[sid] = entry
+            if updates_path.exists():
+                try:
+                    updates = json.loads(updates_path.read_text(encoding="utf-8"))
+                except Exception:
+                    updates = []
+            if completed_by_id:
+                print(
+                    f"[Resume] loaded {len(completed_by_id)}/{len(dev)} "
+                    f"completed dev samples from {dev_runs_path}",
+                    flush=True,
+                )
+        else:
+            dev_runs_path.touch(exist_ok=True)
 
         for sample_idx, sample in enumerate(dev):
+            sample_id = str(sample.get("question_id"))
+            if sample_id in completed_by_id:
+                all_entries.append(completed_by_id[sample_id])
+                continue
             semantic_before = len(self.memory_core.semantic)
             episodic_before = len(self.memory_core.episodic)
             try:
@@ -108,7 +139,7 @@ class FHIREvoMemoryCycleRunner(FHIRBatchMemoryCycleRunner):
                     "episodic_before": episodic_before,
                 })
                 updates.append(event)
-                (epoch_dir / "evo_memory_updates.json").write_text(
+                updates_path.write_text(
                     json.dumps(updates, indent=2, default=str),
                     encoding="utf-8",
                 )

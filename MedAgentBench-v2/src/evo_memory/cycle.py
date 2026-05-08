@@ -72,8 +72,37 @@ class EvoMemoryCycleRunner(BatchMemoryCycleRunner):
         update_events: List[Dict] = []
 
         print(f"[Epoch {epoch}] {len(dev)} dev samples — sequential Evo memory update per episode")
+        sample_by_id = {str(sample.get("id")): sample for sample in dev}
+        completed_by_id: Dict[str, Dict] = {}
+
+        if self.resume and dev_runs_path.exists():
+            with dev_runs_path.open(encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        entry = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    sid = str(entry.get("sample_id"))
+                    if sid not in sample_by_id or sid in completed_by_id:
+                        continue
+                    completed_by_id[sid] = entry
+            if updates_path.exists():
+                try:
+                    update_events = json.loads(updates_path.read_text(encoding="utf-8"))
+                except Exception:
+                    update_events = []
+            if completed_by_id:
+                print(
+                    f"[Resume] loaded {len(completed_by_id)}/{len(dev)} "
+                    f"completed dev samples from {dev_runs_path}",
+                    flush=True,
+                )
 
         for sample_idx, sample in enumerate(dev):
+            sample_id = str(sample.get("id"))
+            if sample_id in completed_by_id:
+                all_entries.append(completed_by_id[sample_id])
+                continue
             semantic_before = len(self.memory_core.semantic)
             episodic_before = len(self.memory_core.episodic)
 
