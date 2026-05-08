@@ -101,21 +101,28 @@ class VertexAgent(AgentClient):
             "agent": "model",
         }
 
+        system_parts = []
         contents = []
         for msg in history:
-            role = role_map.get(msg["role"], "user")
-            contents.append({
-                "role": role,
-                "parts": [{"text": msg["content"]}]
-            })
+            role = msg["role"]
+            if role == "system":
+                system_parts.append({"text": msg["content"]})
+            else:
+                contents.append({
+                    "role": role_map.get(role, "user"),
+                    "parts": [{"text": msg["content"]}]
+                })
 
-        return {
+        body: Dict[str, Any] = {
             "contents": contents,
             "generationConfig": {
                 "temperature": self.temperature,
                 "maxOutputTokens": self.max_output_tokens
             }
         }
+        if system_parts:
+            body["systemInstruction"] = {"parts": system_parts}
+        return body
 
     def inference(self, history: List[dict]) -> str:
         """

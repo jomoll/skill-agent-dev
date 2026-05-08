@@ -21,13 +21,13 @@ def parse_rules(text: str) -> List[Tuple[str, str]]:
     """
     ops: List[Tuple[str, str]] = []
     for match in PARSE_PATTERN.finditer(text):
-        op_raw, rule_text = match.group(1), match.group(3).strip()
+        op_raw, rule_text = match.group(1), match.group(2).strip()
         if not rule_text:
             continue
         if any(kw in rule_text for kw in BANNED_KEYWORDS):
             continue
         if not rule_text.endswith("."):
-            continue
+            rule_text += "."
         op = "ADD" if "ADD" in op_raw else op_raw.strip()
         ops.append((op, rule_text))
     return ops
