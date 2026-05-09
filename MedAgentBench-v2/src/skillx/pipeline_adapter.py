@@ -10,15 +10,73 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
-def _entry_to_trajectory(entry: Dict[str, Any]) -> Dict[str, Any]:
-    instruction = entry.get("instruction") or entry.get("sample_id") or ""
-    history = entry.get("history") or []
+def _shorten_text(value: Any, max_chars: int) -> str:
+    text = str(value)
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text
+    return text[:max_chars] + f"\n...[truncated {len(text) - max_chars} chars]"
+
+
+def _compact_history(
+    history: List[Dict[str, Any]],
+    *,
+    max_messages: int,
+    max_message_chars: int,
+) -> List[Dict[str, str]]:
+    if max_messages > 0 and len(history) > max_messages:
+        head = max(1, min(4, max_messages // 3))
+        tail = max_messages - head
+        history = history[:head] + history[-tail:]
+
     normalised = []
     for m in history:
         role = m.get("role", "user")
         if role == "agent":
             role = "assistant"
-        normalised.append({"role": role, "content": str(m.get("content", ""))})
+        normalised.append({
+            "role": role,
+            "content": _shorten_text(m.get("content", ""), max_message_chars),
+        })
+    return normalised
+
+
+def _entry_to_trajectory(
+    entry: Dict[str, Any],
+    *,
+    max_history_messages: int = 24,
+    max_message_chars: int = 1200,
+    max_action_chars: int = 600,
+    max_actions: int = 12,
+) -> Dict[str, Any]:
+    instruction = entry.get("instruction") or entry.get("sample_id") or ""
+    history = entry.get("history") or []
+    agent_actions = entry.get("agent_actions") or []
+
+    if agent_actions:
+        if max_actions > 0 and len(agent_actions) > max_actions:
+            head = max(1, min(3, max_actions // 3))
+            tail = max_actions - head
+            omitted = len(agent_actions) - max_actions
+            agent_actions = (
+                list(agent_actions[:head])
+                + [f"...[{omitted} intermediate actions omitted]"]
+                + list(agent_actions[-tail:])
+            )
+        action_text = "\n".join(
+            f"{i + 1}. {_shorten_text(action, max_action_chars)}"
+            for i, action in enumerate(agent_actions)
+        )
+        normalised = [
+            {"role": "user", "content": _shorten_text(instruction, max_message_chars)},
+            {"role": "assistant", "content": action_text},
+        ]
+    else:
+        normalised = _compact_history(
+            history,
+            max_messages=max_history_messages,
+            max_message_chars=max_message_chars,
+        )
+
     return {
         "trajectory_id": entry.get("sample_id", ""),
         "task_id": entry.get("sample_id", ""),
@@ -95,8 +153,14 @@ class SkillXPipelineAdapter:
         self._Skill = Skill
         self._SkillLibrary = SkillLibrary
 
-        self.plan_extractor = PlanExtractor(llm=self.lm_adapter)
-        self.extractor = FunctionalSkillExtractor(llm=self.lm_adapter)
+        extractor_retries = int(self.config.get("extractor_max_retries", 2))
+        plan_retries = int(self.config.get("plan_extractor_max_retries", 1))
+
+        self.plan_extractor = PlanExtractor(llm=self.lm_adapter, max_retries=plan_retries)
+        self.extractor = FunctionalSkillExtractor(
+            llm=self.lm_adapter,
+            max_retries=extractor_retries,
+        )
         self.filter_pipeline = TwoStageFilterPipeline(
             llm=self.lm_adapter,
             skip_stage1=not self.config.get("filter_stage1", True),
@@ -122,7 +186,16 @@ class SkillXPipelineAdapter:
         if not successful:
             return {"n_successful": 0, "n_extracted": 0, "n_after_merge": len(self.library.functional)}
 
-        trajectories = [_entry_to_trajectory(e) for e in successful]
+        trajectories = [
+            _entry_to_trajectory(
+                e,
+                max_history_messages=int(self.config.get("max_history_messages", 24)),
+                max_message_chars=int(self.config.get("max_message_chars", 1200)),
+                max_action_chars=int(self.config.get("max_action_chars", 600)),
+                max_actions=int(self.config.get("max_actions", 12)),
+            )
+            for e in successful
+        ]
         stats = asyncio.run(self._extract_and_update(trajectories))
         self._save_library()
         return stats

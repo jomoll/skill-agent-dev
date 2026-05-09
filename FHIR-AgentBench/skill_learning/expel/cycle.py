@@ -44,6 +44,9 @@ class FHIRExPeLCycleRunner(FHIRBatchMemoryCycleRunner):
             model=updater_cfg.get("model", self.agent_model),
             base_url=updater_cfg.get("base_url", self.agent_base_url),
             temperature=float(updater_cfg.get("temperature", 0.7)),
+            max_tokens=int(updater_cfg.get("max_tokens", 32768)),
+            timeout=int(updater_cfg.get("timeout", 120)),
+            max_retries=int(updater_cfg.get("max_retries", 1)),
         )
         lm_adapter = ExPeLLMAdapter(updater_agent)
 
