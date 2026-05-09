@@ -171,6 +171,12 @@ class BatchMemoryCycleRunner:
                 except Exception:
                     pass
                 continue
+            if self.resume:
+                resumed = self._resume_epoch_val_if_dev_complete(epoch, epoch_dir)
+                if resumed is not None:
+                    val_score = resumed
+                    self._maybe_update_best_checkpoint(val_score, epoch)
+                    continue
             print(f"\n{'='*60}")
             print(f"  EPOCH {epoch}")
             print(f"{'='*60}")
@@ -190,6 +196,63 @@ class BatchMemoryCycleRunner:
     # ------------------------------------------------------------------
     # Epoch
     # ------------------------------------------------------------------
+
+    def _load_dev_run_entries(self, path: Path) -> List[Dict]:
+        entries: List[Dict] = []
+        if not path.exists():
+            return entries
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if "sample_id" in entry:
+                    entries.append(entry)
+        return entries
+
+    def _resume_epoch_val_if_dev_complete(
+        self,
+        epoch: int,
+        epoch_dir: Path,
+    ) -> Optional[float]:
+        dev_runs_path = epoch_dir / "dev_runs.jsonl"
+        entries = self._load_dev_run_entries(dev_runs_path)
+        if not entries:
+            return None
+
+        expected_ids = {str(sample["id"]) for sample in self.dev_data}
+        latest_by_id: Dict[str, Dict] = {}
+        for entry in entries:
+            sample_id = str(entry.get("sample_id"))
+            if sample_id in expected_ids:
+                latest_by_id[sample_id] = entry
+
+        missing = expected_ids - set(latest_by_id)
+        if missing:
+            print(
+                f"[Resume] Epoch {epoch} has {len(latest_by_id)}/{len(expected_ids)} "
+                "dev samples; rerunning epoch"
+            )
+            return None
+
+        epoch_correct = sum(
+            1 for entry in latest_by_id.values() if entry.get("is_correct") is True
+        )
+        epoch_total = len(expected_ids)
+        dev_score = epoch_correct / epoch_total if epoch_total else 0.0
+
+        print(f"\n{'='*60}")
+        print(f"  EPOCH {epoch}")
+        print(f"{'='*60}")
+        print(
+            f"[Resume] Epoch {epoch} dev already complete "
+            f"({epoch_correct}/{epoch_total}, {dev_score:.1%}); running val only"
+        )
+        val_score = self._evaluate_val(epoch, epoch_dir, dev_score=dev_score)
+        print(f"\n[Epoch {epoch}] Dev: {epoch_correct}/{epoch_total} "
+              f"({dev_score:.1%}) | Val: {val_score:.1%}")
+        return val_score
 
     def _load_prev_results(self, epoch: int) -> Optional[Dict[str, bool]]:
         if epoch == 0:
