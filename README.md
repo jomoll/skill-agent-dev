@@ -805,19 +805,107 @@ Two fixes applied to all benchmarks:
 
 **Symmetric error exclusion:** When a probe sample produces a task error (machinery failure, not agent failure), it is excluded from regression counting *only if that same sample also errored in the baseline probe* (`baseline_error_ids`). This prevents inflated adjusted scores from unconditionally skipping candidate errors that the baseline did not produce.
 
-### 6. Lenient result scoring — format-independent numeric matching (MedAgentBench)
+### 6. MedAgentBench scorer — applied bug fixes and reverted relaxed syntax scoring
+
 **Files:** `MedAgentBench/src/server/tasks/medagentbench/utils.py`, `MedAgentBench/src/server/tasks/medagentbench/refsol.py`
 
-The original graders called `json.loads(results.result)` which silently returns `False` via a bare `except` when `results.result` is already a Python object (list or number) rather than a JSON string — a frequent occurrence when results travel through the HTTP task API. This caused false negatives on all read tasks.
+Two genuine bugs from the upstream scorer are fixed and kept permanently:
 
-Additionally, read-task graders required exact JSON equality for numeric answers. Agents that found the correct value but expressed it as prose (e.g., `"85 mg/dL"` instead of `[85.0]`) were scored incorrect even though the clinical answer was right, making base-agent vs. skill-agent comparisons confounded by formatting rather than reasoning.
+**Bug fix 1 — off-by-one bounds check in `extract_posts`** (`refsol.py`):
+The original checked `idx < len(results.history)` before reading `results.history[idx+1]`, which still allows an out-of-bounds access when `idx` is the last element. Fixed to `idx+1 < len(results.history)`.
 
-Two helpers added to `utils.py`:
-- `parse_agent_result(raw)` — normalises to Python object whether `raw` is a JSON string or already deserialized.
-- `extract_numeric(raw)` — extracts the first numeric value from any result format (Python list, list of prose strings, bare string).
-- `match_agent_result(ref_sol, raw, tol=0.0, accept_empty=False)` — tries exact match first, then numeric extraction with configurable tolerance (default 0, i.e. exact numeric value regardless of units or surrounding text). `accept_empty=True` for write tasks that accept `[]` as a valid completion signal.
+**Bug fix 2 — FHIR `route` field is a CodeableConcept dict, not a string** (`refsol.py`, task9):
+The upstream assertion `payload['dosageInstruction'][0]['route'].lower().strip() == 'oral'` crashes when the FHIR server returns `route` as a dict (standard FHIR R4 CodeableConcept). Fixed to extract the display string from either `.text` or `.coding[0].display` before the comparison.
 
-All read-task graders (`task1`, `task2`, `task4`, `task5`, `task6`, `task7`, `task9`, `task10`) updated to use these helpers. Write-task graders (`task3`, `task8`) are unchanged (they check FHIR POST history, not `results.result`).
+---
+
+#### Relaxed syntax scoring — reverted, original graders restored
+
+A set of lenient scoring helpers were previously added but have been **reverted** to keep scoring identical to the upstream benchmark. The original graders use strict `json.loads` + exact equality. Below is the full description of what was built and how to re-enable it if needed.
+
+**What was built:**
+
+Three helpers in `utils.py`:
+
+```python
+import re
+
+def parse_agent_result(raw):
+    """Normalize agent result to a Python object regardless of whether it
+    arrived as a JSON string (from the HTTP API) or was already deserialized."""
+    if isinstance(raw, str):
+        return json.loads(raw)
+    return raw
+
+def extract_numeric(raw):
+    """Extract the first numeric value from any result representation.
+    Handles JSON strings, Python lists of numbers, Python lists of prose
+    strings (e.g. ["85 mg/dL"]), and bare strings."""
+    try:
+        parsed = parse_agent_result(raw)
+    except Exception:
+        parsed = raw
+    if isinstance(parsed, (int, float)):
+        return float(parsed)
+    if isinstance(parsed, list) and len(parsed) >= 1:
+        val = parsed[0]
+        if isinstance(val, (int, float)):
+            return float(val)
+        if isinstance(val, str):
+            m = re.search(r"-?\d+(?:\.\d+)?", val)
+            if m:
+                return float(m.group())
+    if isinstance(parsed, str):
+        m = re.search(r"-?\d+(?:\.\d+)?", parsed)
+        if m:
+            return float(m.group())
+    return None
+
+def match_agent_result(ref_sol, raw, tol=0.0, accept_empty=False):
+    """Compare agent result against reference with lenient type handling.
+    1. Normalize raw (JSON string or Python object → Python object).
+    2. Try exact equality.
+    3. If ref_sol is [single_number], extract a number from raw and compare
+       with tolerance (default 0 = exact numeric match regardless of units).
+    4. For [number, date] ref_sol, extracts numeric from parsed[0] and checks
+       date prefix match on parsed[1].
+    5. accept_empty=True accepts [] as a valid answer (write tasks)."""
+    try:
+        parsed = parse_agent_result(raw)
+    except Exception:
+        parsed = None
+    if parsed is not None and ref_sol == parsed:
+        return True
+    if accept_empty and parsed == []:
+        return True
+    if (isinstance(ref_sol, list) and len(ref_sol) == 1
+            and isinstance(ref_sol[0], (int, float))):
+        extracted = extract_numeric(raw)
+        if extracted is not None:
+            return abs(extracted - float(ref_sol[0])) <= tol
+    if (isinstance(ref_sol, list) and len(ref_sol) == 2
+            and isinstance(ref_sol[0], (int, float))
+            and isinstance(ref_sol[1], str)
+            and isinstance(parsed, list) and len(parsed) == 2):
+        extracted = extract_numeric(parsed[0])
+        date_prefix = str(ref_sol[1])[:10]
+        if (extracted is not None
+                and abs(extracted - float(ref_sol[0])) <= tol
+                and isinstance(parsed[1], str)
+                and parsed[1].startswith(date_prefix)):
+            return True
+    return False
+```
+
+**To re-enable:** add these three functions to `utils.py` (with `import re` at the top), then replace each grader's `try/except json.loads` block with the appropriate helper call:
+
+| Task | Original block | Replacement |
+|---|---|---|
+| task1, task2, task4, task7 | `try: if ref_sol == json.loads(results.result): return True; return False; except: return False` | `return match_agent_result(ref_sol, results.result)` |
+| task5, task9, task10 | `try: if (ref_sol == json.loads(...)) or ([] == json.loads(...)): return True; ...` | `return match_agent_result(ref_sol, results.result, accept_empty=True)` |
+| task6 | `try: l = json.loads(...); if (len(l)==1) and abs(l[0]-ref_sol[0])<0.1: ...` | `extracted = extract_numeric(results.result); if extracted is not None and abs(extracted - ref_sol[0]) < 0.1: return True; return False` |
+
+Write-task graders (task3, task8) check FHIR POST history and are unaffected.
 
 ### 8. Best-checkpoint tracking
 **Files:** `AgentBench/src/skills/cycle.py`, `MedAgentBench/src/skills/cycle.py`, `FHIR-AgentBench/skill_learning/cycle.py`
