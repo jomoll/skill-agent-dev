@@ -88,6 +88,8 @@ class Prompter:
             role_dict = {
                 "user": user_role,
                 "agent": agent_role,
+                "assistant": agent_role,
+                "system": "system",
             }
             prompt = []
             for item in messages:
