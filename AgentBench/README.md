@@ -308,6 +308,7 @@ Each benchmark ships with pre-computed splits produced by `data/<benchmark>/spli
 | DBBench   | 176 samples (60% of standard.jsonl, stratified by type) | 124 samples | 60 samples (dev.jsonl) |
 | ALFWorld  | 30 samples (6 task types × ~5) | 20 samples | 20 samples (dev.json) |
 | Mind2Web  | 60 samples (indices 0–59) | 40 samples (indices 60–99) | — |
+| Card Game | 80 samples (20 reps × 4 combos) | 60 samples (15 reps × 4 combos) | 60 samples (15 reps × 4 combos) |
 
 **ALFWorld split note**: samples are assigned IDs matching their position in the task's `data_files` list (JSON insertion order from `standard.json`). The split script iterates in insertion order — not alphabetical order — so IDs are consistent with what `AlfWorldTask.get_indices()` returns.
 
