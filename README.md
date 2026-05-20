@@ -4,7 +4,7 @@ Self-improving LLM agent framework using a GRPO-inspired skill cycle. Agents lea
 
 ```
 skill-agent-dev/
-├── AgentBench/          # OS Interaction, DBBench, LTP, Card Game, ALFWorld skill cycles
+├── AgentBench/          # OS Interaction, DBBench, LTP, Card Game, ALFWorld, Knowledge Graph, WebShop, Mind2Web skill cycles
 ├── MedAgentBench/       # FHIR medical records skill cycle (original 10 task types, v1 data)
 ├── MedAgentBench-v2/    # FHIR skill cycle on new clinical tasks (10 redesigned task types)
 └── FHIR-AgentBench/     # Native FHIR-AgentBench skill cycle
@@ -58,7 +58,7 @@ Note: the Evo comparator's baseline is a **protocol-only baseline**. Even before
 - [Docker](https://www.docker.com/) installed and running
 - Google Cloud credentials for Vertex AI (`gcloud auth application-default login`)
 
-### 1. AgentBench (OS Interaction + DBBench + LTP + Card Game + ALFWorld)
+### 1. AgentBench (OS Interaction + DBBench + LTP + Card Game + ALFWorld + Knowledge Graph + WebShop + Mind2Web)
 
 ```bash
 cd AgentBench
@@ -89,7 +89,23 @@ docker pull longinyu/agentbench-card_game
 
 # ALFWorld
 docker pull longinyu/agentbench-alfworld
+
+# Mind2Web (image takes ~5 min to start; wait for "200 OK" before launching the cycle)
+docker pull longinyu/agentbench-mind2web
 ```
+
+**Knowledge Graph** runs against a Freebase SPARQL endpoint rather than a task
+Docker image. Point `configs/tasks/kg.yaml` at a running endpoint — by default
+`http://localhost:3001/sparql` (`default.parameters.env_options.urls.kg`). To
+start one in a container instead, fill in the commented `database_file` /
+`env_driver: docker` block in `kg.yaml` with the absolute path to a Freebase
+Virtuoso db file on the host.
+
+**WebShop** runs in-process inside the task worker (it imports `web_agent_site`),
+so there is no task image to pull. Install the WebShop environment and its
+product index per `src/server/tasks/webshop/Dockerfile` and
+`src/server/tasks/webshop/requirements.txt` before starting the worker; the first
+launch is slow while the index loads.
 
 ### 2. MedAgentBench
 
@@ -180,9 +196,16 @@ docker network create os_interaction_default || true
 | LTP | 5020 | 5021 |
 | Card Game | 5030 | 5031 |
 | ALFWorld | 5060 | 5061 |
+| Knowledge Graph | 5080 | 5081 |
+| WebShop | 5090 | 5091 |
+| Mind2Web | 5070 | 5071 |
 | MedAgentBench | 5050 | 5051 |
 | MedAgentBench-v2 | 5070 | 5071 |
 | FHIR-AgentBench | none | none |
+
+> Mind2Web and MedAgentBench-v2 both default to controller port 5070; they live in
+> separate repos/conda envs and would only clash if run at the same time. Pass
+> `--controller-port`/`--base-port` to relocate one if you need both concurrently.
 
 ### OS Interaction
 
@@ -251,6 +274,61 @@ python -m src.start_task -a --config configs/start_skill_task_alfworld.yaml --co
 
 # Terminal 2 — run skill cycle
 python -m src.skill_cycle --config configs/skill_cycle_alfworld.yaml --run-name run_001
+```
+
+### Knowledge Graph
+
+Requires a running Freebase SPARQL endpoint (default `http://localhost:3001/sparql`;
+see Setup §1). The dev/val/test splits are a stratified 60/20/20 of `std.json` by
+source, so every split is served by the existing `kg-std` variant.
+
+```bash
+# Generate data splits (one-time)
+cd AgentBench && python data/knowledgegraph/split_dataset.py
+
+# Terminal 1 — start task worker
+cd AgentBench && conda activate agent-bench
+python -m src.start_task -a --config configs/start_skill_task_kg.yaml --controller-port 5080 --base-port 5081
+
+# Terminal 2 — run skill cycle
+python -m src.skill_cycle --config configs/skill_cycle_kg.yaml --run-name run_001
+```
+
+### WebShop
+
+WebShop runs in-process in the task worker (no task Docker image); the worker
+loads the product index on startup. Splits are a round-robin partition of the
+`webshop-std` index range (0–199).
+
+```bash
+# Generate data splits (one-time)
+cd AgentBench && python data/webshop/split_dataset.py
+
+# Terminal 1 — start task worker
+cd AgentBench && conda activate agent-bench
+python -m src.start_task -a --config configs/start_skill_task_webshop.yaml --controller-port 5090 --base-port 5091
+
+# Terminal 2 — run skill cycle
+python -m src.skill_cycle --config configs/skill_cycle_webshop.yaml --run-name run_001
+```
+
+### Mind2Web
+
+The `longinyu/agentbench-mind2web` image takes ~5 minutes to start — wait until
+the worker terminal shows a `200 OK` before launching the cycle. Mind2Web uses a
+dev/val split only (first 100 in-image samples, 60/40 by index); there is no
+held-out test split.
+
+```bash
+# Generate data splits (one-time)
+cd AgentBench && python data/mind2web/split_dataset.py
+
+# Terminal 1 — start task worker
+cd AgentBench && conda activate agent-bench
+python -m src.start_task -a --config configs/start_skill_task_mind2web.yaml --controller-port 5070 --base-port 5071
+
+# Terminal 2 — run skill cycle
+python -m src.skill_cycle --config configs/skill_cycle_mind2web.yaml --run-name run_001
 ```
 
 ### MedAgentBench
@@ -617,6 +695,9 @@ Output per epoch includes `epoch_N/expel_updates.json` (`n_successes`, `n_failur
 | LTP | 30 | 20 | 20 | 60/40 of standard.xlsx; dev.xlsx held out (IDs offset by 50 to avoid collision) |
 | Card Game | 80 | 60 | 20 | 20/15/5 reps × 4 combos; procedurally generated (`cg-std.test_time=40`) |
 | ALFWorld | 26 | 24 | 20 | Stratified 60/40 of standard.json by task type; dev.json held out |
+| Knowledge Graph | 89 | 29 | 32 | Stratified 60/20/20 of std.json (150) by source; all servable by `kg-std` |
+| WebShop | 100 | 50 | 50 | Round-robin partition of `webshop-std` indices 0–199 |
+| Mind2Web | 60 | 40 | — | First 100 in-image samples, 60/40 by index; no held-out test |
 | FHIR-AgentBench | configurable | configurable | original CSV test split | Defaults to capped train/valid rows from `questions_answers_sql_fhir.csv` |
 
 ### MedAgentBench-v2 task types
@@ -655,6 +736,9 @@ python AgentBench/data/os_interaction/split_dataset.py
 python AgentBench/data/lateralthinkingpuzzle/split_dataset.py
 python AgentBench/data/card_game/split_dataset.py
 python AgentBench/data/alfworld/split_dataset.py
+python AgentBench/data/knowledgegraph/split_dataset.py
+python AgentBench/data/webshop/split_dataset.py
+python AgentBench/data/mind2web/split_dataset.py
 python MedAgentBench/data/medagentbench/split_dataset.py
 python MedAgentBench-v2/data/medagentbench/split_dataset.py
 ```
@@ -708,6 +792,9 @@ AgentBench/skills/
 ├── ltp/base/           # read-only LTP base skills
 ├── card_game/base/     # read-only Card Game base skills
 ├── alfworld/base/      # read-only ALFWorld base skills
+├── knowledgegraph/base/ # read-only Knowledge Graph base skills
+├── webshop/base/       # read-only WebShop base skills
+├── mind2web/base/      # read-only Mind2Web base skills
 └── base/               # shared skeleton template
 
 MedAgentBench/skills/
